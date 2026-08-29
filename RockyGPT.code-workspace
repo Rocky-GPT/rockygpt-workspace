@@ -1,12 +1,12 @@
 {
   "folders": [
+    { "name": "⚙️  Workspace · root & scripts", "path": "." },
     { "name": "🖥️  UI · student app",          "path": "rockygpt-ui" },
     { "name": "🛠️  Dev · control room",        "path": "rockygpt-dev" },
     { "name": "🧠  Brain · Python",             "path": "rockygpt-brain" },
     { "name": "📚  Data · ingest & publish",    "path": "rockygpt-data" },
     { "name": "🧪  Evals · answer quality",     "path": "rockygpt-evals" },
-    { "name": "🚀  Infra · deploy & monitor",   "path": "rockygpt-infra" },
-    { "name": "⚙️  Workspace · root & scripts", "path": "." }
+    { "name": "🚀  Infra · deploy & monitor",   "path": "rockygpt-infra" }
   ],
   "settings": {
     "files.exclude": {
