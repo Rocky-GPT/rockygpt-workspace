@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Ask RockyGPT from a terminal, and print the stages of the turn.
+#
+#   ./rocky ask "when is the next shuttle"    ask, and print the six stages
+#   ./rocky ask "..." --raw                   ask, and print the whole turn
+#   ./rocky bulk short [delayMs]              run a sample set
+#   ./rocky bulk full  [delayMs]              run the capability suite
+#   ./rocky bulk file <path> [delayMs]        run one question per line
+#
+# Talks to rockygpt-dev, which proxies the brain and stamps the turn `dev` so
+# it stays out of the student traffic in the logs dashboard.
+#
+# This used to drive an open browser tab through `/api/remote`, so that a
+# command ran through the student page rather than around it. That page no
+# longer carries dev tooling, and rockygpt-dev has its own bulk runner and
+# inspector, so the round trip through a listening tab bought nothing but a
+# "no chat page is listening" failure mode. It posts directly now.
+set -uo pipefail
+UI="${ROCKY_DEV_UI:-http://localhost:3100}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONVERSATION="dev_cli$(date +%s)"
+
+# Posts one question and prints `{"value": {...}}` for the formatter, so the
+# terminal and the panel agree on the shape of a turn.
+ask_one() {
+  local question="$1" conversation="$2"
+  Q="$question" C="$conversation" python3 -c '
+import json, os, sys, urllib.request, urllib.error
+body = json.dumps({
+    "message": os.environ["Q"],
+    "conversationId": os.environ["C"],
+    "questionOrigin": "dev",
+}).encode()
+req = urllib.request.Request(
+    os.environ["UI"] + "/api/brain/chat",
+    data=body,
+    headers={"content-type": "application/json"},
+)
+try:
+    with urllib.request.urlopen(req, timeout=180) as response:
+        payload = json.load(response)
+except urllib.error.HTTPError as error:
+    detail = error.read().decode(errors="replace")
+    print(json.dumps({"value": {"error": f"HTTP {error.code} — {detail[:300]}"}}))
+    raise SystemExit(1)
+except Exception as error:  # noqa: BLE001 — the CLI reports, it does not handle
+    print(json.dumps({"value": {"error": f"{type(error).__name__}: {error}"}}))
+    raise SystemExit(1)
+
+trace = payload.get("brainTrace") or {}
+# The same flattening the inspector performs: the trace stages, then every
+# other response field except the three the stages already carry.
+carried = {"brainTrace", "answer", "question"}
+turn = {**trace, **{k: v for k, v in payload.items() if k not in carried}}
+print(json.dumps({"value": {"ok": True, "answer": payload.get("answer"), "turn": turn}}))
+'
+}
+export UI
+
+case "${1:-}" in
+  ask)
+    [ -n "${2:-}" ] || { echo "usage: rocky ask \"question\" [--raw]"; exit 1; }
+    ask_one "$2" "$CONVERSATION" | ROCKY_RAW="${3:-}" python3 "$ROOT/rocky-format.py"
+    ;;
+  bulk)
+    case "${2:-}" in
+      short) file="$ROOT/rockygpt-dev/lib/short-run-questions.json"; delay="${3:-0}" ;;
+      full)  file="$ROOT/rockygpt-dev/lib/capability-test-questions.json"; delay="${3:-0}" ;;
+      file)  file="${3:-}"; delay="${4:-0}" ;;
+      *) echo "usage: rocky bulk short|full|file <path> [delayMs]"; exit 1 ;;
+    esac
+    [ -f "$file" ] || { echo "no such file: $file"; exit 1; }
+    # The sample sets are ordered conversations, so they run in order, one at a
+    # time, on a single conversation id.
+    mapfile -t questions < <(FILE="$file" python3 -c '
+import json, os, pathlib
+raw = pathlib.Path(os.environ["FILE"]).read_text()
+qs = json.loads(raw) if raw.lstrip().startswith("[") else [l for l in raw.splitlines() if l.strip()]
+print("\n".join(q for q in qs if not q.lstrip().startswith("#")))')
+    total=${#questions[@]}
+    echo "running $total questions against $UI"
+    asked=0; failed=0
+    for question in "${questions[@]}"; do
+      asked=$((asked+1))
+      result=$(ask_one "$question" "$CONVERSATION")
+      route=$(printf '%s' "$result" | python3 -c '
+import json, sys
+v = json.load(sys.stdin).get("value") or {}
+print((v.get("turn") or {}).get("route") or "FAILED")' 2>/dev/null || echo FAILED)
+      [ "$route" = "FAILED" ] && failed=$((failed+1))
+      printf '  %3d/%d  %-8s %s\n' "$asked" "$total" "$route" "${question:0:60}"
+      [ "$delay" -gt 0 ] && sleep "$(python3 -c "print($delay/1000)")"
+    done
+    echo "finished $asked/$total — $failed failed"
+    ;;
+  *)
+    sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+esac

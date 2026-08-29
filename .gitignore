@@ -1,0 +1,18 @@
+# The service repositories. Each is its own repository with its own remote and
+# its own release cycle; this one holds only the tooling that spans them.
+# Ignored rather than added as submodules, because a submodule would pin a
+# commit per service and turn "run the stack" into "update the pins first".
+/rockygpt-ui/
+/rockygpt-dev/
+/rockygpt-brain/
+/rockygpt-data/
+/rockygpt-evals/
+/rockygpt-infra/
+
+# Written by run-local.sh.
+/.local-logs/
+
+# Per-machine permissions, not shared configuration.
+/.claude/settings.local.json
+
+.DS_Store
