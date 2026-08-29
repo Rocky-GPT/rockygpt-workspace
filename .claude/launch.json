@@ -2,7 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "rockygpt",
+      "name": "rockygpt (open)",
+      "url": "http://localhost:3000",
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "rockygpt-dev (open)",
+      "url": "http://localhost:3100",
+      "port": 3100,
+      "autoPort": false
+    },
+    {
+      "name": "rockygpt (start)",
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "run-local.sh",
@@ -12,7 +24,7 @@
       "autoPort": false
     },
     {
-      "name": "rockygpt-dev",
+      "name": "rockygpt-dev (start)",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "--prefix",
