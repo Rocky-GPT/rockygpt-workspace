@@ -1,0 +1,27 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rockygpt",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "run-local.sh",
+        "preview"
+      ],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "rockygpt-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "rockygpt-dev",
+        "run",
+        "dev"
+      ],
+      "port": 3100,
+      "autoPort": false
+    }
+  ]
+}

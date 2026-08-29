@@ -1,0 +1,68 @@
+{
+  "folders": [
+    { "name": "🖥️  UI · student app",          "path": "rockygpt-ui" },
+    { "name": "🛠️  Dev · control room",        "path": "rockygpt-dev" },
+    { "name": "🧠  Brain · Python",             "path": "rockygpt-brain" },
+    { "name": "📚  Data · ingest & publish",    "path": "rockygpt-data" },
+    { "name": "🧪  Evals · answer quality",     "path": "rockygpt-evals" },
+    { "name": "🚀  Infra · deploy & monitor",   "path": "rockygpt-infra" },
+    { "name": "⚙️  Workspace · root & scripts", "path": "." }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/.venv": true,
+
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/.mypy_cache": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+      "**/*.egg-info": true,
+      "**/__init__.py": true,
+
+      "**/dist": true,
+      "**/build": true,
+      "**/.next": true,
+      "**/.vercel": true,
+      "**/.turbo": true,
+      "**/.eslintcache": true,
+      "**/*.tsbuildinfo": true,
+      "**/next-env.d.ts": true,
+      "**/package-lock.json": true,
+
+      "**/test-results": true,
+      "**/playwright-report": true,
+      "**/coverage": true,
+
+      "**/.local-logs": true,
+      "**/probe*.log": true,
+      "**/*.bak.*": true,
+      "**/.env.bak.*": true,
+
+      "**/.DS_Store": true,
+      "**/Thumbs.db": true,
+
+      "**/.dockerignore": true,
+      "**/.nvmrc": true,
+      "**/.prettierrc": true,
+
+      "rockygpt-evals": true,
+      "rockygpt-infra": true
+    },
+    "debug.internalConsoleOptions": "openOnSessionStart",
+    "debug.openDebug": "openOnSessionStart"
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "🚀 Full Stack",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "./run-local.sh start",
+        "cwd": "${workspaceFolder}"
+      }
+    ]
+  }
+}
