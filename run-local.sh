@@ -80,8 +80,16 @@ start() {
       # The dashboard and production brain must read the same durable log store.
       # Keep local answers on :8000 while sharing only the configured database.
       if [ -n "$shared_database_url" ]; then export DATABASE_URL="$shared_database_url"; fi
+      # Reload on edit. `--reload-dir src` keeps the watcher off .venv and
+      # .git; `--reload-include '*.md'` is the part that is easy to miss, and
+      # the reason a bare --reload is a trap here: each stage reads its
+      # prompt.md once at import (`PLAN = beside(__file__)`), so a prompt edit
+      # changes nothing at all until the process restarts, and uvicorn watches
+      # only *.py unless told otherwise. Local only — the Dockerfile and
+      # render.yaml start production and neither knows about this flag.
       PYTHONPATH=src nohup .venv/bin/python -m uvicorn \
         rockygpt_brain.api.app:app --host 127.0.0.1 --port 8000 \
+        --reload --reload-dir src --reload-include '*.md' \
         >"$LOGS/brain.log" 2>&1 & echo $! >"$PIDS/brain.pid" )
     wait_for 8000 brain 60 || return 1
   fi
