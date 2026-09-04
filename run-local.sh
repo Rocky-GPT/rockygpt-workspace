@@ -63,30 +63,18 @@ kill_ports() {
 start() {
   echo "starting RockyGPT local stack"
   kill_ports
-  local shared_database_url=""
-  if [ -f "$UI_DIR/.env" ]; then
-    shared_database_url="$(grep '^DATABASE_URL=' "$UI_DIR/.env" | cut -d= -f2-)"
-    if [[ "$shared_database_url" == \"*\" && "$shared_database_url" == *\" ]]; then
-      shared_database_url="${shared_database_url:1:${#shared_database_url}-2}"
-    elif [[ "$shared_database_url" == \'*\' && "$shared_database_url" == *\' ]]; then
-      shared_database_url="${shared_database_url:1:${#shared_database_url}-2}"
-    fi
-  fi
+  local shared_staging_token
+  shared_staging_token="$("$BRAIN_DIR/.venv/bin/python" -c '
+import os, sys
+from dotenv import dotenv_values
+print(dotenv_values(sys.argv[1]).get("STAGING_SERVICE_TOKEN", os.getenv("STAGING_SERVICE_TOKEN", "")) or "")
+' "$BRAIN_DIR/.env")"
 
   # --- brain :8000 (reads its own .env) ---
   if port_up 8000; then echo "  ${c_dim}· brain already up${c_off}"; else
     ( cd "$BRAIN_DIR"
       set -a; . ./.env; set +a
-      # The dashboard and production brain must read the same durable log store.
-      # Keep local answers on :8000 while sharing only the configured database.
-      if [ -n "$shared_database_url" ]; then export DATABASE_URL="$shared_database_url"; fi
-      # Reload on edit. `--reload-dir src` keeps the watcher off .venv and
-      # .git; `--reload-include '*.md'` is the part that is easy to miss, and
-      # the reason a bare --reload is a trap here: each stage reads its
-      # prompt.md once at import (`PLAN = beside(__file__)`), so a prompt edit
-      # changes nothing at all until the process restarts, and uvicorn watches
-      # only *.py unless told otherwise. Local only — the Dockerfile and
-      # render.yaml start production and neither knows about this flag.
+      # Reload source and the prompt on edit, without watching .venv or .git.
       PYTHONPATH=src nohup .venv/bin/python -m uvicorn \
         rockygpt_brain.api.app:app --host 127.0.0.1 --port 8000 \
         --reload --reload-dir src --reload-include '*.md' \
@@ -94,21 +82,21 @@ start() {
     wait_for 8000 brain 60 || return 1
   fi
 
-  # --- ui :3000 (secrets pulled from the brain's .env so they always match) ---
+  # --- ui :3000 (shares the optional environment token with the brain) ---
   if port_up 3000; then echo "  ${c_dim}· ui already up${c_off}"; else
     ( use_node22; cd "$UI_DIR"
       export BRAIN_URL=http://127.0.0.1:8000
-      export ADMIN_API_TOKEN="$(grep '^ADMIN_API_TOKEN=' "$BRAIN_DIR/.env" | cut -d= -f2-)"
+      export STAGING_SERVICE_TOKEN="$shared_staging_token"
       nohup npm run dev >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
     wait_for 3000 ui 90 || return 1
   fi
 
-  # --- dev ui :3100 (reads its own .env; admin token must match the brain's) ---
+  # --- dev ui :3100 (same HTTP contract and environment token as the UI) ---
   if port_up 3100; then echo "  ${c_dim}· dev ui already up${c_off}"; else
     if [ -d "$DEV_DIR/node_modules" ]; then
       ( use_node22; cd "$DEV_DIR"
         export BRAIN_URL=http://127.0.0.1:8000
-        export ADMIN_API_TOKEN="$(grep '^ADMIN_API_TOKEN=' "$BRAIN_DIR/.env" | cut -d= -f2-)"
+        export STAGING_SERVICE_TOKEN="$shared_staging_token"
         nohup npm run dev >"$LOGS/dev.log" 2>&1 & echo $! >"$PIDS/dev.pid" )
       wait_for 3100 dev 90 || return 1
     else

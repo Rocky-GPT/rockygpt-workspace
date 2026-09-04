@@ -39,27 +39,35 @@ Each needs its own `.env`; see the `.env.example` in each repository.
     ./run-local.sh stop
 
 `start` clears ports 3000, 3100 and 8000 first, then waits for each service to
-answer. It reads the brain's `.env` for `ADMIN_API_TOKEN` and exports it to the
-dev UI, so the two sides always match — the most common cause of an empty logs
-dashboard is starting that app by hand instead.
+answer. The Brain reads its own `.env`; both web clients are pointed at the
+local Brain automatically and share its optional `STAGING_SERVICE_TOKEN`.
+The Brain uses its own `DATABASE_URL`.
 
 ## Asking from a terminal
 
-    ./rocky ask "when is the next shuttle"      # print the six stages
-    ./rocky ask "..." --raw                     # print the whole turn
-    ./rocky bulk short [delayMs]                # run a sample set
-    ./rocky bulk full  [delayMs]                # run the capability suite
+    ./rocky ask "when is the next shuttle"      # answer, status, and sources
+    ./rocky ask "..." --raw                     # complete response JSON
+    ./rocky ask "..." --history /tmp/rocky.json  # start or continue a conversation
+    ./rocky bulk short [delayMs]                # run sample questions independently
+    ./rocky bulk full  [delayMs]                # run the larger sample set
     ./rocky bulk file <path> [delayMs]          # one question per line
 
-Goes through `rockygpt-dev`, which proxies the brain and stamps each turn `dev`
-so it stays out of the student rows in the logs dashboard. `rocky-format.py`
-does the printing; `rocky` does not work without it.
+Goes through `rockygpt-dev` at `http://localhost:3100`; set `ROCKY_DEV_UI` to use
+another address. Python 3 is required. `rocky-format.py` prints the response.
 
-This used to drive an open browser tab through the student app's `/api/remote`,
-so that a command ran through the page rather than around it. That page no
-longer carries dev tooling, and the dev app has its own bulk runner and
-inspector, so the round trip bought nothing but a "no chat page is listening"
-failure mode.
+Every request contains only `messages`: the ordered user and assistant messages
+for that conversation. There is no server conversation ID or hidden memory.
+Without `--history`, each CLI question is independent. With `--history`, the
+CLI reads a JSON array of `{ "role": "user" | "assistant", "content": "..." }`
+messages and updates the file after each successful response. A missing file
+starts an empty conversation. Bulk commands accept the same option to test
+follow-ups. History files contain the conversation text; keep them outside the
+repository.
+
+The Brain returns an answer, its status (`answered`, `partial`, `clarification`,
+or `unavailable`), citations, model and request identifiers, the dataset version,
+and a compact tool trace. Student and developer clients both use this JSON
+contract; no streaming or internal pipeline-stage contract is required.
 
 ## What is deliberately not here
 
