@@ -1,99 +1,141 @@
-#!/usr/bin/env bash
-# Ask RockyGPT from a terminal, and print the stages of the turn.
-#
-#   ./rocky ask "when is the next shuttle"    ask, and print the six stages
-#   ./rocky ask "..." --raw                   ask, and print the whole turn
-#   ./rocky bulk short [delayMs]              run a sample set
-#   ./rocky bulk full  [delayMs]              run the capability suite
-#   ./rocky bulk file <path> [delayMs]        run one question per line
-#
-# Talks to rockygpt-dev, which proxies the brain and stamps the turn `dev` so
-# it stays out of the student traffic in the logs dashboard.
-#
-# This used to drive an open browser tab through `/api/remote`, so that a
-# command ran through the student page rather than around it. That page no
-# longer carries dev tooling, and rockygpt-dev has its own bulk runner and
-# inspector, so the round trip through a listening tab bought nothing but a
-# "no chat page is listening" failure mode. It posts directly now.
-set -uo pipefail
-UI="${ROCKY_DEV_UI:-http://localhost:3100}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONVERSATION="dev_cli$(date +%s)"
+#!/usr/bin/env python3
+"""Ask the Brain through the Dev UI using the public messages contract."""
 
-# Posts one question and prints `{"value": {...}}` for the formatter, so the
-# terminal and the panel agree on the shape of a turn.
-ask_one() {
-  local question="$1" conversation="$2"
-  Q="$question" C="$conversation" python3 -c '
-import json, os, sys, urllib.request, urllib.error
-body = json.dumps({
-    "message": os.environ["Q"],
-    "conversationId": os.environ["C"],
-    "questionOrigin": "dev",
-}).encode()
-req = urllib.request.Request(
-    os.environ["UI"] + "/api/brain/chat",
-    data=body,
-    headers={"content-type": "application/json"},
-)
-try:
-    with urllib.request.urlopen(req, timeout=180) as response:
-        payload = json.load(response)
-except urllib.error.HTTPError as error:
-    detail = error.read().decode(errors="replace")
-    print(json.dumps({"value": {"error": f"HTTP {error.code} — {detail[:300]}"}}))
-    raise SystemExit(1)
-except Exception as error:  # noqa: BLE001 — the CLI reports, it does not handle
-    print(json.dumps({"value": {"error": f"{type(error).__name__}: {error}"}}))
-    raise SystemExit(1)
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-trace = payload.get("brainTrace") or {}
-# The same flattening the inspector performs: the trace stages, then every
-# other response field except the three the stages already carry.
-carried = {"brainTrace", "answer", "question"}
-turn = {**trace, **{k: v for k, v in payload.items() if k not in carried}}
-print(json.dumps({"value": {"ok": True, "answer": payload.get("answer"), "turn": turn}}))
-'
-}
-export UI
 
-case "${1:-}" in
-  ask)
-    [ -n "${2:-}" ] || { echo "usage: rocky ask \"question\" [--raw]"; exit 1; }
-    ask_one "$2" "$CONVERSATION" | ROCKY_RAW="${3:-}" python3 "$ROOT/rocky-format.py"
-    ;;
-  bulk)
-    case "${2:-}" in
-      short) file="$ROOT/rockygpt-dev/lib/short-run-questions.json"; delay="${3:-0}" ;;
-      full)  file="$ROOT/rockygpt-dev/lib/capability-test-questions.json"; delay="${3:-0}" ;;
-      file)  file="${3:-}"; delay="${4:-0}" ;;
-      *) echo "usage: rocky bulk short|full|file <path> [delayMs]"; exit 1 ;;
-    esac
-    [ -f "$file" ] || { echo "no such file: $file"; exit 1; }
-    # The sample sets are ordered conversations, so they run in order, one at a
-    # time, on a single conversation id.
-    mapfile -t questions < <(FILE="$file" python3 -c '
-import json, os, pathlib
-raw = pathlib.Path(os.environ["FILE"]).read_text()
-qs = json.loads(raw) if raw.lstrip().startswith("[") else [l for l in raw.splitlines() if l.strip()]
-print("\n".join(q for q in qs if not q.lstrip().startswith("#")))')
-    total=${#questions[@]}
-    echo "running $total questions against $UI"
-    asked=0; failed=0
-    for question in "${questions[@]}"; do
-      asked=$((asked+1))
-      result=$(ask_one "$question" "$CONVERSATION")
-      route=$(printf '%s' "$result" | python3 -c '
-import json, sys
-v = json.load(sys.stdin).get("value") or {}
-print((v.get("turn") or {}).get("route") or "FAILED")' 2>/dev/null || echo FAILED)
-      [ "$route" = "FAILED" ] && failed=$((failed+1))
-      printf '  %3d/%d  %-8s %s\n' "$asked" "$total" "$route" "${question:0:60}"
-      [ "$delay" -gt 0 ] && sleep "$(python3 -c "print($delay/1000)")"
-    done
-    echo "finished $asked/$total — $failed failed"
-    ;;
-  *)
-    sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'
-    ;;
-esac
+ROOT = Path(__file__).resolve().parent
+
+
+def read_history(path):
+    if path is None or not path.exists():
+        return []
+    messages = json.loads(path.read_text())
+    if not isinstance(messages, list) or any(
+        not isinstance(message, dict)
+        or set(message) != {"role", "content"}
+        or not isinstance(message["role"], str)
+        or message["role"] not in {"user", "assistant"}
+        or not isinstance(message["content"], str)
+        or not message["content"].strip()
+        for message in messages
+    ):
+        raise ValueError("history must be a JSON array of {role, content} messages")
+    return messages
+
+
+def save_history(path, messages):
+    if path is None:
+        return
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(messages, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def ask(question, history):
+    endpoint = os.environ.get("ROCKY_DEV_UI", "http://localhost:3100").rstrip("/")
+    messages = [*history, {"role": "user", "content": question}]
+    request = Request(
+        endpoint + "/api/brain/chat",
+        data=json.dumps({"messages": messages}).encode(),
+        headers={"content-type": "application/json", "accept": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=180) as response:
+            payload = json.load(response)
+    except HTTPError as error:
+        raw = error.read().decode(errors="replace")
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            payload = {"error": raw[:500]}
+        return {"httpStatus": error.code, "response": payload}, False
+    except (URLError, TimeoutError, OSError, ValueError) as error:
+        return {"error": str(error)}, False
+    if not isinstance(payload, dict) or not isinstance(payload.get("answer"), str) or not payload["answer"].strip():
+        return {"error": "The Brain returned an incomplete answer.", "response": payload}, False
+    history[:] = [*messages, {"role": "assistant", "content": payload["answer"]}]
+    return payload, True
+
+
+def print_response(payload, raw=False):
+    subprocess.run(
+        [sys.executable, str(ROOT / "rocky-format.py"), *(["--raw"] if raw else [])],
+        input=json.dumps(payload), text=True, check=True,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    one = commands.add_parser("ask", help="ask one student question")
+    one.add_argument("question")
+    one.add_argument("--raw", action="store_true", help="print the complete response JSON")
+    one.add_argument("--history", type=Path, help="read and update this JSON messages file")
+    bulk = commands.add_parser("bulk", help="ask a sample set or a questions file")
+    bulk.add_argument("set", choices=["short", "full", "file"])
+    bulk.add_argument("arguments", nargs="*", metavar="PATH_OR_DELAY_MS")
+    bulk.add_argument("--history", type=Path, help="preserve and save conversation history")
+    args = parser.parse_args()
+
+    try:
+        history = read_history(args.history)
+        if args.command == "ask":
+            if not args.question.strip():
+                parser.error("question must not be empty")
+            payload, ok = ask(args.question, history)
+            if ok:
+                save_history(args.history, history)
+            print_response(payload, args.raw)
+            return 0 if ok else 1
+
+        arguments = list(args.arguments)
+        if args.set == "file":
+            if not arguments:
+                parser.error("bulk file requires a path")
+            questions_path = Path(arguments.pop(0))
+        else:
+            name = "short-run-questions.json" if args.set == "short" else "capability-test-questions.json"
+            questions_path = ROOT / "rockygpt-dev" / "lib" / name
+        if len(arguments) > 1:
+            parser.error("only one delay in milliseconds is allowed")
+        delay = float(arguments[0]) / 1000 if arguments else 0
+        if not 0 <= delay < float("inf"):
+            parser.error("delay must be finite and nonnegative")
+        content = questions_path.read_text()
+        questions = json.loads(content) if content.lstrip().startswith("[") else content.splitlines()
+        if not isinstance(questions, list) or any(not isinstance(item, str) for item in questions):
+            parser.error("questions must be a JSON string array or one question per line")
+        questions = [question.strip() for question in questions if question.strip() and not question.lstrip().startswith("#")]
+        failures = 0
+        for index, question in enumerate(questions, 1):
+            payload, ok = ask(question, history if args.history else [])
+            failures += not ok
+            if ok:
+                save_history(args.history, history)
+            print(f"\n{index}/{len(questions)}  {question}", flush=True)
+            print_response(payload)
+            if delay and index < len(questions):
+                time.sleep(delay)
+        print(f"\nFinished {len(questions)} questions; {failures} request failures.")
+        return 1 if failures else 0
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f"rocky: {error}\n")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
