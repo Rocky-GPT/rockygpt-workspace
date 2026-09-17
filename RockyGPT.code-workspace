@@ -47,8 +47,13 @@
       "**/.nvmrc": true,
       "**/.prettierrc": true,
 
+      "rockygpt-brain": true,
+      "rockygpt-data": true,
+      "rockygpt-dev": true,
       "rockygpt-evals": true,
-      "rockygpt-infra": true
+      "rockygpt-infra": true,
+      "rockygpt-ui": true,
+      ".claude": true
     },
     "debug.internalConsoleOptions": "openOnSessionStart",
     "debug.openDebug": "openOnSessionStart"
