@@ -12,7 +12,4 @@
 # Written by run-local.sh.
 /.local-logs/
 
-# Per-machine permissions, not shared configuration.
-/.claude/settings.local.json
-
 .DS_Store
