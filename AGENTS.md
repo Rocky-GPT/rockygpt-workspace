@@ -35,6 +35,16 @@ The workspace consists of 6 standalone services coordinated by this root tooling
 - **First Principles**: Keep architectures simple and modular. Do not introduce premature abstractions, complex agent graphs, or extra layers until a concrete measured failure demands it.
 - **Do what is asked, then stop**: Focus strictly on the user's immediate request without gratuitous refactoring.
 
+### Service-Specific Rules:
+
+#### `rockygpt-brain` (Clean-Room Implementation)
+- Do not read, inspect, copy, reference, or reuse old RockyGPT v1 branches, commits, tags, tests, prompts, or architecture unless explicitly asked.
+- Build one small step at a time from first principles.
+
+#### `rockygpt-ui` & `rockygpt-dev` (Next.js Framework Guidance)
+- The Next.js version in this workspace has breaking changes and updated conventions compared to older training data.
+- Read the bundled documentation in `node_modules/next/dist/docs/` before writing frontend code.
+
 ---
 
 ## 4. Running the Local Environment
