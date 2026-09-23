@@ -33,6 +33,7 @@ The workspace consists of 6 standalone services coordinated by this root tooling
 
 - **Zero Hallucination / Evidence Grounding**: The brain must strictly answer based on retrieved verified database evidence. Do not extrapolate unverified claims, ranks, or official campus authority.
 - **First Principles**: Keep architectures simple and modular. Do not introduce premature abstractions, complex agent graphs, or extra layers until a concrete measured failure demands it.
+- **Entity Facts Are Shared**: Normal application and Brain fact reads must resolve a canonical entity and use the shared entity-fact reader in `rockygpt-brain/src/rockygpt_brain/retrieval/entity_facts.py`. Source collections are discovery and provenance, not competing attribute authorities. Keep all supporting evidence, explicit conflicts/unknowns, and dated record boundaries. Do not reconcile or infer fact values independently in a UI. See `rockygpt-brain/docs/entity-facts.md` for the contract and permitted source-format normalization.
 - **Do what is asked, then stop**: Focus strictly on the user's immediate request without gratuitous refactoring.
 
 ### Service-Specific Rules:
