@@ -32,30 +32,36 @@ database — every fact arrives over HTTP from the brain.
 Keep `.env.example` files as configuration templates. 1Password stores active
 credentials, while `config/local-environments.json` stores public local settings.
 The production equivalent is `rockygpt-infra/config/environment-sync.json`.
-There are five 1Password Environments: local Brain, local Data, production Brain,
-production UI, and automation credentials. Old connection archives and a separate
-Developer UI Environment are not needed.
+Matching credentials are stored once. Five 1Password Environments contain eleven
+credentials, with explicit source mappings controlling which service receives each:
 
-On this workstation, 1Password supplies the Brain and data `.env` paths through
-local file mounts. These paths are named pipes: their plaintext contents are
-delivered on demand and are not stored on disk. The student UI, Developer UI,
-and HTTP eval suites use the local Brain without their own credential files.
+| 1Password Environment | Contents | Consumers |
+| --- | --- | --- |
+| RockyGPT - Shared | OpenAI key, Typesafe/Jev key, campus database connection | API keys: local and production Brain; database: Data and production Brain |
+| RockyGPT - Local Brain | Local campus and ledger database connections | Local Brain only |
+| RockyGPT - Data Storage | Artifact storage access key and secret | Data publishing |
+| RockyGPT - Production | Production ledger connection and UI hash key | Render Brain and Vercel UI respectively |
+| RockyGPT - Automation | Render and Vercel API tokens | Environment sync |
 
-On a new workstation, open each local Environment in the 1Password desktop app
-and connect **Local .env file** to the corresponding repository's `.env` path:
+On this workstation, 1Password supplies three named pipes. Their plaintext
+contents are delivered on demand and are not stored on disk. On a new workstation,
+connect **Local .env file** in the desktop app to these workspace-relative paths:
 
 | 1Password Environment | Local path |
 | --- | --- |
-| RockyGPT - Local - Brain | `rockygpt-brain/.env` |
-| RockyGPT - Local - Data | `rockygpt-data/.env` |
+| RockyGPT - Shared | `.env.shared` |
+| RockyGPT - Local Brain | `rockygpt-brain/.env` |
+| RockyGPT - Data Storage | `rockygpt-data/.env` |
 
-Use the actual Environment names shown in 1Password. Never connect a production
-Environment to these local paths. Keep 1Password running and approve its prompt
-when a service first reads a mount; authorization lasts until 1Password locks.
-The Brain mount contains only `DATABASE_URL`, `BRAIN_OPENAI_API_KEY`,
-`BRAIN_LEDGER_DATABASE_URL`, and `BRAIN_TYPESAFE_API_KEY`. The Data mount contains
-`DATABASE_URL`, `RAW_ARTIFACT_ACCESS_KEY_ID`, and `RAW_ARTIFACT_SECRET_ACCESS_KEY`;
-the storage keys are used by artifact publishing when its bucket is configured.
+Use `./run-local.sh` or `local-env.py` to combine these sources in memory. Each
+service receives only its assigned keys. In particular, Local Brain uses its own
+campus database, never the shared production/Data connection. The production
+ledger is not mounted locally. The student UI, Developer UI, and HTTP eval suites
+need no credential files.
+
+Keep 1Password running and approve its prompt when a mount is first read;
+authorization lasts until 1Password locks. Data's storage keys are used by artifact
+publishing when its bucket is configured.
 Environment names, project IDs, and routing settings belong in the JSON config.
 The model comes from the Brain's versioned release, not an environment override.
 Python requires `python-dotenv` 1.2 or newer for this launcher.
@@ -73,7 +79,7 @@ supported. See [1Password's local file documentation](https://www.1password.dev/
 
 `start` first combines and validates the Brain's settings and secrets, then clears ports
 3000, 3100 and 8000 and waits for each service to answer. The Brain reads its
-1Password-mounted `.env`; both web clients are pointed at the
+1Password-mounted sources; both web clients are pointed at the
 local Brain automatically. The local Brain is bound to loopback and does not
 use a staging token.
 The Brain uses its own `DATABASE_URL`. Its validated variables are passed through

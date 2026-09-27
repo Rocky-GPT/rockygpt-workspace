@@ -7,11 +7,17 @@
       "BRAIN_ROUTING_MODE": "active",
       "BRAIN_ROUTING_PROVIDER": "typesafe"
     },
-    "secrets": ["DATABASE_URL", "BRAIN_OPENAI_API_KEY", "BRAIN_LEDGER_DATABASE_URL", "BRAIN_TYPESAFE_API_KEY"]
+    "sources": [
+      {"path": "rockygpt-brain/.env", "keys": ["DATABASE_URL", "BRAIN_LEDGER_DATABASE_URL"]},
+      {"path": ".env.shared", "keys": ["BRAIN_OPENAI_API_KEY", "BRAIN_TYPESAFE_API_KEY"]}
+    ]
   },
   "data": {
     "directory": "rockygpt-data",
     "settings": {},
-    "secrets": ["DATABASE_URL", "RAW_ARTIFACT_ACCESS_KEY_ID", "RAW_ARTIFACT_SECRET_ACCESS_KEY"]
+    "sources": [
+      {"path": ".env.shared", "keys": ["DATABASE_URL"]},
+      {"path": "rockygpt-data/.env", "keys": ["RAW_ARTIFACT_ACCESS_KEY_ID", "RAW_ARTIFACT_SECRET_ACCESS_KEY"]}
+    ]
   }
 }

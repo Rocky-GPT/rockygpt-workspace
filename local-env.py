@@ -24,7 +24,8 @@ class EnvironmentError(Exception):
 
 def load_environment(service, root=ROOT):
     config = json.loads((root / "config/local-environments.json").read_text())[service]
-    settings, keys = config["settings"], config["secrets"]
+    settings, sources = config["settings"], config["sources"]
+    keys = [key for source in sources for key in source["keys"]]
     if set(settings) - PUBLIC_SETTINGS or set(settings) & set(keys):
         raise EnvironmentError("Local settings contain an unapproved or conflicting variable.")
     if service == "brain" and settings.get("BRAIN_ENVIRONMENT") != "development":
@@ -35,16 +36,19 @@ def load_environment(service, root=ROOT):
         raise EnvironmentError("The local secret list is invalid.")
     if any(not isinstance(value, str) or not value for value in settings.values()):
         raise EnvironmentError("A local setting is missing or empty.")
-    for attempt in range(5):
-        source = dotenv_values(root / config["directory"] / ".env")
-        if source or attempt == 4:
-            break
-        time.sleep(0.2)
-    if any(not isinstance(source.get(key), str) or not source[key] for key in keys):
-        raise EnvironmentError("Local secrets are incomplete. Open 1Password and authorize its .env mount.")
-    # Only explicitly needed secrets are inherited, even during migration from
-    # an Environment that still contains obsolete variables or public settings.
-    return settings | {key: source[key] for key in keys}
+    values = dict(settings)
+    for source in sources:
+        for attempt in range(5):
+            mounted = dotenv_values(root / source["path"])
+            if mounted or attempt == 4:
+                break
+            time.sleep(0.2)
+        if any(not isinstance(mounted.get(key), str) or not mounted[key] for key in source["keys"]):
+            raise EnvironmentError("Local secrets are incomplete. Open 1Password and authorize its .env mount.")
+        # Select from each source independently: a shared DATABASE_URL must
+        # never replace the local Brain database from its own source.
+        values.update({key: mounted[key] for key in source["keys"]})
+    return values
 
 
 def main():
