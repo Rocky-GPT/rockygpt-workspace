@@ -63,28 +63,8 @@ kill_ports() {
 start() {
   echo "starting RockyGPT local stack"
   # Read/authorize the 1Password mount before stopping a working stack.
-  local brain_values shared_staging_token
-  brain_values="$("$BRAIN_DIR/.venv/bin/python" -c '
-import json, os, sys, time
-from dotenv import dotenv_values
-required = ("BRAIN_ENVIRONMENT", "BRAIN_OPENAI_API_KEY", "BRAIN_OPENAI_PROJECT", "BRAIN_LEDGER_DATABASE_URL", "DATABASE_URL")
-# A pipe can briefly return no contents while 1Password refreshes its writer.
-for attempt in range(5):
-    values = dotenv_values(sys.argv[1])
-    if values or attempt == 4:
-        break
-    time.sleep(0.2)
-if any(not values.get(key) for key in required):
-    sys.exit("Brain environment is incomplete. Open 1Password, enable its local .env mount, and authorize access.")
-if values["BRAIN_ENVIRONMENT"] != "development":
-    sys.exit("The local stack requires BRAIN_ENVIRONMENT=development.")
-values.setdefault("STAGING_SERVICE_TOKEN", os.getenv("STAGING_SERVICE_TOKEN", ""))
-print(json.dumps({key: value for key, value in values.items() if value is not None}))
-' "$BRAIN_DIR/.env")" || return 1
-  shared_staging_token="$(printf '%s' "$brain_values" | "$BRAIN_DIR/.venv/bin/python" -c '
-import json, sys
-print(json.load(sys.stdin).get("STAGING_SERVICE_TOKEN") or "")
-')" || return 1
+  local brain_values
+  brain_values="$("$BRAIN_DIR/.venv/bin/python" "$ROOT/local-env.py" --snapshot brain)" || return 1
   kill_ports
 
   # --- brain :8000 (read the mount once, then inherit values across reloads) ---
@@ -94,6 +74,9 @@ print(json.load(sys.stdin).get("STAGING_SERVICE_TOKEN") or "")
       printf '%s' "$brain_values" | PYTHONPATH=src nohup .venv/bin/python -c '
 import json, os, sys
 os.environ.update(json.load(sys.stdin))
+os.environ.pop("STAGING_SERVICE_TOKEN", None)
+os.environ.pop("OPENAI_CHAT_MODEL", None)
+os.environ.pop("BRAIN_EXPECTED_CONFIG_HASH", None)
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
 ' \
@@ -103,21 +86,21 @@ os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
     wait_for 8000 brain 60 || return 1
   fi
 
-  # --- ui :3000 (shares the optional environment token with the brain) ---
+  # --- ui :3000 (local Brain is bound to loopback without a staging token) ---
   if port_up 3000; then echo "  ${c_dim}· ui already up${c_off}"; else
     ( use_node22; cd "$UI_DIR"
       export BRAIN_URL=http://127.0.0.1:8000
-      export STAGING_SERVICE_TOKEN="$shared_staging_token"
+      unset STAGING_SERVICE_TOKEN
       nohup npm run dev >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
     wait_for 3000 ui 90 || return 1
   fi
 
-  # --- dev ui :3100 (same HTTP contract and environment token as the UI) ---
+  # --- dev ui :3100 (same local HTTP contract as the UI) ---
   if port_up 3100; then echo "  ${c_dim}· dev ui already up${c_off}"; else
     if [ -d "$DEV_DIR/node_modules" ]; then
       ( use_node22; cd "$DEV_DIR"
         export BRAIN_URL=http://127.0.0.1:8000
-        export STAGING_SERVICE_TOKEN="$shared_staging_token"
+        unset STAGING_SERVICE_TOKEN
         nohup npm run dev >"$LOGS/dev.log" 2>&1 & echo $! >"$PIDS/dev.pid" )
       wait_for 3100 dev 90 || return 1
     else
