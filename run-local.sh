@@ -62,20 +62,41 @@ kill_ports() {
 
 start() {
   echo "starting RockyGPT local stack"
-  kill_ports
-  local shared_staging_token
-  shared_staging_token="$("$BRAIN_DIR/.venv/bin/python" -c '
-import os, sys
+  # Read/authorize the 1Password mount before stopping a working stack.
+  local brain_values shared_staging_token
+  brain_values="$("$BRAIN_DIR/.venv/bin/python" -c '
+import json, os, sys, time
 from dotenv import dotenv_values
-print(dotenv_values(sys.argv[1]).get("STAGING_SERVICE_TOKEN", os.getenv("STAGING_SERVICE_TOKEN", "")) or "")
-' "$BRAIN_DIR/.env")"
+required = ("BRAIN_ENVIRONMENT", "BRAIN_OPENAI_API_KEY", "BRAIN_OPENAI_PROJECT", "BRAIN_LEDGER_DATABASE_URL", "DATABASE_URL")
+# A pipe can briefly return no contents while 1Password refreshes its writer.
+for attempt in range(5):
+    values = dotenv_values(sys.argv[1])
+    if values or attempt == 4:
+        break
+    time.sleep(0.2)
+if any(not values.get(key) for key in required):
+    sys.exit("Brain environment is incomplete. Open 1Password, enable its local .env mount, and authorize access.")
+if values["BRAIN_ENVIRONMENT"] != "development":
+    sys.exit("The local stack requires BRAIN_ENVIRONMENT=development.")
+values.setdefault("STAGING_SERVICE_TOKEN", os.getenv("STAGING_SERVICE_TOKEN", ""))
+print(json.dumps({key: value for key, value in values.items() if value is not None}))
+' "$BRAIN_DIR/.env")" || return 1
+  shared_staging_token="$(printf '%s' "$brain_values" | "$BRAIN_DIR/.venv/bin/python" -c '
+import json, sys
+print(json.load(sys.stdin).get("STAGING_SERVICE_TOKEN") or "")
+')" || return 1
+  kill_ports
 
-  # --- brain :8000 (reads its own .env) ---
+  # --- brain :8000 (read the mount once, then inherit values across reloads) ---
   if port_up 8000; then echo "  ${c_dim}· brain already up${c_off}"; else
     ( cd "$BRAIN_DIR"
-      set -a; . ./.env; set +a
       # Reload source and the prompt on edit, without watching .venv or .git.
-      PYTHONPATH=src nohup .venv/bin/python -m uvicorn \
+      printf '%s' "$brain_values" | PYTHONPATH=src nohup .venv/bin/python -c '
+import json, os, sys
+os.environ.update(json.load(sys.stdin))
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
+' \
         rockygpt_brain.api.app:app --host 127.0.0.1 --port 8000 \
         --reload --reload-dir src --reload-include '*.md' \
         >"$LOGS/brain.log" 2>&1 & echo $! >"$PIDS/brain.pid" )
@@ -144,7 +165,7 @@ preview() { start && tail -f "$LOGS/ui.log"; }
 case "${1:-start}" in
   start)   start ;;
   stop)    stop ;;
-  restart) stop; sleep 2; start ;;
+  restart) start ;;
   status)  status ;;
   logs)    logs "${2:-brain}" ;;
   preview) preview ;;
