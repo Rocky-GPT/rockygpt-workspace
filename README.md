@@ -29,7 +29,30 @@ database — every fact arrives over HTTP from the brain.
     git clone git@github.com:Rocky-GPT/rockygpt-infra.git
     # rockygpt-dev has no remote yet
 
-Each needs its own `.env`; see the `.env.example` in each repository.
+Keep `.env.example` files as configuration templates. On this workstation,
+1Password Environments supplies the Brain, data, and developer UI `.env` paths
+through local file mounts. These paths are named pipes: their plaintext contents
+are delivered on demand and are not stored on disk. The student UI and HTTP eval
+suites use the local Brain without their own credential files.
+
+On a new workstation, open each local Environment in the 1Password desktop app
+and connect **Local .env file** to the corresponding repository's `.env` path:
+
+| 1Password Environment | Local path |
+| --- | --- |
+| RockyGPT - Local - Brain | `rockygpt-brain/.env` |
+| RockyGPT - Local - Data | `rockygpt-data/.env` |
+| RockyGPT - Local - Developer UI | `rockygpt-dev/.env` |
+
+Use the actual Environment names shown in 1Password. Never connect a production
+Environment to these local paths. Keep 1Password running and approve its prompt
+when a service first reads a mount; authorization lasts until 1Password locks.
+Store `BRAIN_ENVIRONMENT` explicitly as `development`, not `${APP_ENV}`: exported
+variable order can differ from the original file. Python requires
+`python-dotenv` 1.2 or newer for this launcher.
+Edit values in 1Password, then restart affected processes. Do not open a mounted
+file in an editor while a service is reading it: simultaneous reads are not
+supported. See [1Password's local file documentation](https://www.1password.dev/environments/local-env-file).
 
 ## Running the stack
 
@@ -38,10 +61,14 @@ Each needs its own `.env`; see the `.env.example` in each repository.
     ./run-local.sh logs brain     # or `ui`, or `dev`
     ./run-local.sh stop
 
-`start` clears ports 3000, 3100 and 8000 first, then waits for each service to
-answer. The Brain reads its own `.env`; both web clients are pointed at the
+`start` first reads and validates the Brain environment, then clears ports
+3000, 3100 and 8000 and waits for each service to answer. The Brain reads its
+1Password-mounted `.env`; both web clients are pointed at the
 local Brain automatically and share its optional `STAGING_SERVICE_TOKEN`.
-The Brain uses its own `DATABASE_URL`.
+The Brain uses its own `DATABASE_URL`. Its validated variables are passed through
+an in-memory pipe and inherited by reload workers, so workers do not compete to
+read the 1Password mount. Both `start` and `restart` reject incomplete or
+production Brain settings before stopping the current services.
 
 ## Asking from a terminal
 
