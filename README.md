@@ -29,11 +29,17 @@ database — every fact arrives over HTTP from the brain.
     git clone git@github.com:Rocky-GPT/rockygpt-infra.git
     # rockygpt-dev has no remote yet
 
-Keep `.env.example` files as configuration templates. On this workstation,
-1Password Environments supplies the Brain, data, and developer UI `.env` paths
-through local file mounts. These paths are named pipes: their plaintext contents
-are delivered on demand and are not stored on disk. The student UI and HTTP eval
-suites use the local Brain without their own credential files.
+Keep `.env.example` files as configuration templates. 1Password stores active
+credentials, while `config/local-environments.json` stores public local settings.
+The production equivalent is `rockygpt-infra/config/environment-sync.json`.
+There are five 1Password Environments: local Brain, local Data, production Brain,
+production UI, and automation credentials. Old connection archives and a separate
+Developer UI Environment are not needed.
+
+On this workstation, 1Password supplies the Brain and data `.env` paths through
+local file mounts. These paths are named pipes: their plaintext contents are
+delivered on demand and are not stored on disk. The student UI, Developer UI,
+and HTTP eval suites use the local Brain without their own credential files.
 
 On a new workstation, open each local Environment in the 1Password desktop app
 and connect **Local .env file** to the corresponding repository's `.env` path:
@@ -42,15 +48,19 @@ and connect **Local .env file** to the corresponding repository's `.env` path:
 | --- | --- |
 | RockyGPT - Local - Brain | `rockygpt-brain/.env` |
 | RockyGPT - Local - Data | `rockygpt-data/.env` |
-| RockyGPT - Local - Developer UI | `rockygpt-dev/.env` |
 
 Use the actual Environment names shown in 1Password. Never connect a production
 Environment to these local paths. Keep 1Password running and approve its prompt
 when a service first reads a mount; authorization lasts until 1Password locks.
-Store `BRAIN_ENVIRONMENT` explicitly as `development`, not `${APP_ENV}`: exported
-variable order can differ from the original file. Python requires
-`python-dotenv` 1.2 or newer for this launcher.
-Edit values in 1Password, then restart affected processes. Do not open a mounted
+The Brain mount contains only `DATABASE_URL`, `BRAIN_OPENAI_API_KEY`,
+`BRAIN_LEDGER_DATABASE_URL`, and `BRAIN_TYPESAFE_API_KEY`. The Data mount contains
+`DATABASE_URL`, `RAW_ARTIFACT_ACCESS_KEY_ID`, and `RAW_ARTIFACT_SECRET_ACCESS_KEY`;
+the storage keys are used by artifact publishing when its bucket is configured.
+Environment names, project IDs, and routing settings belong in the JSON config.
+The model comes from the Brain's versioned release, not an environment override.
+Python requires `python-dotenv` 1.2 or newer for this launcher.
+Edit credentials in 1Password or settings in the config, then restart affected
+processes. Do not open a mounted
 file in an editor while a service is reading it: simultaneous reads are not
 supported. See [1Password's local file documentation](https://www.1password.dev/environments/local-env-file).
 
@@ -61,14 +71,24 @@ supported. See [1Password's local file documentation](https://www.1password.dev/
     ./run-local.sh logs brain     # or `ui`, or `dev`
     ./run-local.sh stop
 
-`start` first reads and validates the Brain environment, then clears ports
+`start` first combines and validates the Brain's settings and secrets, then clears ports
 3000, 3100 and 8000 and waits for each service to answer. The Brain reads its
 1Password-mounted `.env`; both web clients are pointed at the
-local Brain automatically and share its optional `STAGING_SERVICE_TOKEN`.
+local Brain automatically. The local Brain is bound to loopback and does not
+use a staging token.
 The Brain uses its own `DATABASE_URL`. Its validated variables are passed through
 an in-memory pipe and inherited by reload workers, so workers do not compete to
 read the 1Password mount. Both `start` and `restart` reject incomplete or
 production Brain settings before stopping the current services.
+
+For standalone Brain tools, use the same loader so public settings and secrets
+are combined without creating a plaintext file:
+
+    rockygpt-brain/.venv/bin/python local-env.py brain -- .venv/bin/python scripts/evaluate_routing.py --help
+    rockygpt-brain/.venv/bin/python local-env.py data -- npm run data:quality
+
+The loader runs the command from that service's directory. Never print or log
+the loader's internal `--snapshot` output; it contains credentials.
 
 ## Asking from a terminal
 

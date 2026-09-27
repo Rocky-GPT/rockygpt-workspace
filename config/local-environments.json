@@ -1,0 +1,17 @@
+{
+  "brain": {
+    "directory": "rockygpt-brain",
+    "settings": {
+      "BRAIN_ENVIRONMENT": "development",
+      "BRAIN_OPENAI_PROJECT": "proj_aMhXgndK2e9EUQZpXbLFh4yV",
+      "BRAIN_ROUTING_MODE": "active",
+      "BRAIN_ROUTING_PROVIDER": "typesafe"
+    },
+    "secrets": ["DATABASE_URL", "BRAIN_OPENAI_API_KEY", "BRAIN_LEDGER_DATABASE_URL", "BRAIN_TYPESAFE_API_KEY"]
+  },
+  "data": {
+    "directory": "rockygpt-data",
+    "settings": {},
+    "secrets": ["DATABASE_URL", "RAW_ARTIFACT_ACCESS_KEY_ID", "RAW_ARTIFACT_SECRET_ACCESS_KEY"]
+  }
+}
