@@ -59,6 +59,25 @@ campus database, never the shared production/Data connection. The production
 ledger is not mounted locally. The student UI, Developer UI, and HTTP eval suites
 need no credential files.
 
+Reading a mount needs 1Password unlocked and a click on its prompt, which stops
+unattended runs such as Remote Control sessions. So the local Brain keeps its four
+secrets in `rockygpt-brain/.env.local`, a plain file readable only by you and
+ignored by both repositories. Copy them there once, with 1Password unlocked:
+
+    rockygpt-brain/.venv/bin/python local-env.py --seed brain
+
+`--seed` refuses to write unless git ignores the file, writes it owner-only, and
+prints only key names. While the file exists, `run-local.sh`, `local-env.py brain`
+and the dev Brain deploy script read it and never touch 1Password. Rerun `--seed`
+after rotating a Brain credential in 1Password; it also resets `DATABASE_URL` to
+1Password's value. Delete the file to read 1Password directly again.
+
+Data keeps reading 1Password, because its sources include the production campus
+database. Local-only data commands need no secrets; point dotenv away from the
+mount so they never wait on a prompt:
+
+    DOTENV_CONFIG_PATH=/dev/null DATABASE_URL=postgresql://postgres@127.0.0.1:55434/<db> npm run data:publish
+
 Keep 1Password running and approve its prompt when a mount is first read;
 authorization lasts until 1Password locks. Data's storage keys are used by artifact
 publishing when its bucket is configured.
@@ -78,8 +97,8 @@ supported. See [1Password's local file documentation](https://www.1password.dev/
     ./run-local.sh stop
 
 `start` first combines and validates the Brain's settings and secrets, then clears ports
-3000, 3100 and 8000 and waits for each service to answer. The Brain reads its
-1Password-mounted sources; both web clients are pointed at the
+3000, 3100 and 8000 and waits for each service to answer. The Brain reads
+`rockygpt-brain/.env.local`, or its 1Password sources when that file is absent; both web clients are pointed at the
 local Brain automatically. The local Brain is bound to loopback and does not
 use a staging token.
 The Brain uses its own `DATABASE_URL`. Its validated variables are passed through
