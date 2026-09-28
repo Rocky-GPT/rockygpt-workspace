@@ -62,12 +62,12 @@ kill_ports() {
 
 start() {
   echo "starting RockyGPT local stack"
-  # Read/authorize the 1Password mount before stopping a working stack.
+  # Read the Brain's secrets (its local file, else 1Password) before stopping a working stack.
   local brain_values
   brain_values="$("$BRAIN_DIR/.venv/bin/python" "$ROOT/local-env.py" --snapshot brain)" || return 1
   kill_ports
 
-  # --- brain :8000 (read the mount once, then inherit values across reloads) ---
+  # --- brain :8000 (read secrets once, then inherit values across reloads) ---
   if port_up 8000; then echo "  ${c_dim}· brain already up${c_off}"; else
     ( cd "$BRAIN_DIR"
       # Reload source and the prompt on edit, without watching .venv or .git.
