@@ -1,6 +1,7 @@
 {
   "brain": {
     "directory": "rockygpt-brain",
+    "local_file": "rockygpt-brain/.env.local",
     "settings": {
       "BRAIN_ENVIRONMENT": "development",
       "BRAIN_OPENAI_PROJECT": "proj_aMhXgndK2e9EUQZpXbLFh4yV",
