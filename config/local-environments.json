@@ -10,7 +10,7 @@
     },
     "sources": [
       {"path": "rockygpt-brain/.env", "keys": ["DATABASE_URL", "BRAIN_LEDGER_DATABASE_URL"]},
-      {"path": ".env.shared", "keys": ["BRAIN_OPENAI_API_KEY", "BRAIN_TYPESAFE_API_KEY", "VOYAGE_API_KEY"]}
+      {"path": ".env.shared", "keys": ["BRAIN_OPENAI_API_KEY", "BRAIN_TYPESAFE_API_KEY"]}
     ]
   },
   "data": {
