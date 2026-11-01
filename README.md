@@ -32,35 +32,41 @@ database — every fact arrives over HTTP from the brain.
 Keep `.env.example` files as configuration templates. 1Password stores active
 credentials, while `config/local-environments.json` stores public local settings.
 The production equivalent is `rockygpt-infra/config/environment-sync.json`.
-Matching credentials are stored once. Five 1Password Environments contain eleven
-credentials, with explicit source mappings controlling which service receives each:
+All project credentials live in one 1Password Environment, **RockyGPT**. Local
+and production database connections have explicit names; each launcher maps
+only the assigned values into the variable names its service expects.
 
-| 1Password Environment | Contents | Consumers |
-| --- | --- | --- |
-| RockyGPT - Shared | OpenAI key, Typesafe/Jev key, campus database connection | API keys: local and production Brain; database: Data and production Brain |
-| RockyGPT - Local Brain | Local campus and ledger database connections | Local Brain only |
-| RockyGPT - Data Storage | Artifact storage access key and secret | Data publishing |
-| RockyGPT - Production | Production ledger connection and UI hash key | Render Brain and Vercel UI respectively |
-| RockyGPT - Automation | Render and Vercel API tokens | Environment sync |
-
-On this workstation, 1Password supplies three named pipes. Their plaintext
-contents are delivered on demand and are not stored on disk. On a new workstation,
-connect **Local .env file** in the desktop app to these workspace-relative paths:
-
-| 1Password Environment | Local path |
+| Stored variable | Consumers / service variable |
 | --- | --- |
-| RockyGPT - Shared | `.env.shared` |
-| RockyGPT - Local Brain | `rockygpt-brain/.env` |
-| RockyGPT - Data Storage | `rockygpt-data/.env` |
+| `LOCAL_DATABASE_URL` | Local Brain → `DATABASE_URL` |
+| `LOCAL_LEDGER_DATABASE_URL` | Local Brain → `BRAIN_LEDGER_DATABASE_URL` |
+| `PRODUCTION_DATABASE_URL` | Data and production Brain → `DATABASE_URL` |
+| `PRODUCTION_LEDGER_DATABASE_URL` | Production Brain → `BRAIN_LEDGER_DATABASE_URL` |
+| `PRODUCTION_SERVICE_TOKEN` | Production Brain, student UI, production-connected dev UI → `STAGING_SERVICE_TOKEN` |
+| `BRAIN_OPENAI_API_KEY`, `BRAIN_TYPESAFE_API_KEY` | Local and production Brain |
+| `VOYAGE_API_KEY` | Local Brain |
+| `ABUSE_HASH_KEY` | Production student UI |
+| `RAW_ARTIFACT_ACCESS_KEY_ID`, `RAW_ARTIFACT_SECRET_ACCESS_KEY` | Data publishing |
+| `RENDER_API_KEY`, `VERCEL_TOKEN` | Production environment sync only |
 
-Use `./run-local.sh` or `local-env.py` to combine these sources in memory. Each
-service receives only its assigned keys. In particular, Local Brain uses its own
-campus database, never the shared production/Data connection. The production
-ledger is not mounted locally. The student UI, Developer UI, and HTTP eval suites
-need no credential files.
+Connect one **Local .env file** destination in 1Password:
+`~/.config/rockygpt/rockygpt.env`. This is a named pipe in an owner-only directory,
+not a plaintext credential file. `local-env.py` selects variables using
+`config/local-environments.json`; each `keys` object maps a service variable to
+its stored 1Password name. No service imports the whole environment.
+
+`./run-local.sh` keeps both web clients on the local Brain. To run the dev UI
+against production instead, stop its existing process on port 3100, use Node 22,
+and run from this workspace:
+
+    rockygpt-brain/.venv/bin/python local-env.py dev-production -- npm run dev -- --hostname 127.0.0.1
+
+This loads only the production service token into the dev UI's server process.
+Running `./run-local.sh restart` returns both web clients to the local Brain.
+The ordinary local student UI and dev UI need no credential file.
 
 Reading a mount needs 1Password unlocked and a click on its prompt, which stops
-unattended runs such as Remote Control sessions. So the local Brain keeps its four
+unattended runs such as Remote Control sessions. So the local Brain keeps its five
 secrets in `rockygpt-brain/.env.local`, a plain file readable only by you and
 ignored by both repositories. Copy them there once, with 1Password unlocked:
 
@@ -72,9 +78,9 @@ and the dev Brain deploy script read it and never touch 1Password. Rerun `--seed
 after rotating a Brain credential in 1Password; it also resets `DATABASE_URL` to
 1Password's value. Delete the file to read 1Password directly again.
 
-Data keeps reading 1Password, because its sources include the production campus
-database. Local-only data commands need no secrets; point dotenv away from the
-mount so they never wait on a prompt:
+Run credential-dependent Data commands through `local-env.py data -- <command>`;
+this selects its production campus database and artifact credentials. Local-only
+data commands can supply their database directly:
 
     DOTENV_CONFIG_PATH=/dev/null DATABASE_URL=postgresql://postgres@127.0.0.1:55434/<db> npm run data:publish
 

@@ -70,6 +70,30 @@ class LocalEnvironmentTests(unittest.TestCase):
         with self.assertRaises(LOCAL.EnvironmentError):
             self.load({"BRAIN_OPENAI_API_KEY": "secret"})
 
+    def test_one_environment_selects_local_database_and_excludes_production_secrets(self):
+        self.config["brain"]["sources"] = [{"path": "all.env", "keys": {
+            "DATABASE_URL": "LOCAL_DATABASE_URL", "BRAIN_OPENAI_API_KEY": "BRAIN_OPENAI_API_KEY"}}]
+        result = self.load({"LOCAL_DATABASE_URL": "local-db", "PRODUCTION_DATABASE_URL": "production-db",
+                            "BRAIN_OPENAI_API_KEY": "shared-key", "RENDER_API_KEY": "hosting-token",
+                            "PRODUCTION_SERVICE_TOKEN": "production-token"})
+        self.assertEqual(result["DATABASE_URL"], "local-db")
+        self.assertEqual(result["BRAIN_OPENAI_API_KEY"], "shared-key")
+        self.assertFalse({"PRODUCTION_DATABASE_URL", "RENDER_API_KEY", "PRODUCTION_SERVICE_TOKEN"} & result.keys())
+
+    def test_missing_local_database_never_falls_back_to_production(self):
+        self.config["brain"]["sources"] = [{"path": "all.env", "keys": {"DATABASE_URL": "LOCAL_DATABASE_URL"}}]
+        with self.assertRaises(LOCAL.EnvironmentError):
+            self.load({"DATABASE_URL": "wrong-db", "PRODUCTION_DATABASE_URL": "production-db"})
+
+    def test_production_dev_ui_receives_only_its_token_and_address(self):
+        self.config["dev-production"] = {"directory": "dev", "settings": {"BRAIN_URL": "https://brain.example"},
+            "sources": [{"path": "all.env", "keys": {"STAGING_SERVICE_TOKEN": "PRODUCTION_SERVICE_TOKEN"}}]}
+        (self.root / "config/local-environments.json").write_text(json.dumps(self.config))
+        with patch.object(LOCAL, "dotenv_values", return_value={"PRODUCTION_SERVICE_TOKEN": "token",
+                                                               "PRODUCTION_LEDGER_DATABASE_URL": "ledger"}):
+            self.assertEqual(LOCAL.load_environment("dev-production", self.root),
+                             {"BRAIN_URL": "https://brain.example", "STAGING_SERVICE_TOKEN": "token"})
+
 
 class LocalFileTests(unittest.TestCase):
     """The owner-only local file replaces 1Password prompts for the Brain."""

@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -22,17 +23,32 @@ import time
 from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parent
-PUBLIC_SETTINGS = {"BRAIN_ENVIRONMENT", "BRAIN_OPENAI_PROJECT", "BRAIN_ROUTING_MODE", "BRAIN_ROUTING_PROVIDER"}
+PUBLIC_SETTINGS = {"BRAIN_ENVIRONMENT", "BRAIN_OPENAI_PROJECT", "BRAIN_ROUTING_MODE", "BRAIN_ROUTING_PROVIDER", "BRAIN_URL"}
 
 
 class EnvironmentError(Exception):
     """Safe diagnostic with no environment values."""
 
 
+def source_mapping(source):
+    """Map each service variable to its explicitly named 1Password variable."""
+    keys = source["keys"]
+    if isinstance(keys, list):
+        if len(keys) != len(set(keys)):
+            raise EnvironmentError("Duplicate local secret mapping.")
+        keys = {key: key for key in keys}
+    if not isinstance(keys, dict) or not keys or any(
+        not isinstance(key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key)
+        for key in [*keys, *keys.values()]
+    ):
+        raise EnvironmentError("Invalid local secret mapping.")
+    return keys
+
+
 def service_config(service, root=ROOT):
     config = json.loads((root / "config/local-environments.json").read_text())[service]
     settings, sources = config["settings"], config["sources"]
-    keys = [key for source in sources for key in source["keys"]]
+    keys = [key for source in sources for key in source_mapping(source)]
     if set(settings) - PUBLIC_SETTINGS or set(settings) & set(keys):
         raise EnvironmentError("Local settings contain an unapproved or conflicting variable.")
     if service == "brain" and settings.get("BRAIN_ENVIRONMENT") != "development":
@@ -49,16 +65,15 @@ def service_config(service, root=ROOT):
 def read_mounts(root, sources):
     values = {}
     for source in sources:
+        mapping = source_mapping(source)
         for attempt in range(5):
-            mounted = dotenv_values(root / source["path"])
+            mounted = dotenv_values(root / Path(source["path"]).expanduser(), interpolate=False)
             if mounted or attempt == 4:
                 break
             time.sleep(0.2)
-        if any(not isinstance(mounted.get(key), str) or not mounted[key] for key in source["keys"]):
+        if any(not isinstance(mounted.get(key), str) or not mounted[key] for key in mapping.values()):
             raise EnvironmentError("Local secrets are incomplete. Open 1Password and authorize its .env mount.")
-        # Select from each source independently: a shared DATABASE_URL must
-        # never replace the local Brain database from its own source.
-        values.update({key: mounted[key] for key in source["keys"]})
+        values.update({destination: mounted[key] for destination, key in mapping.items()})
     return values
 
 
@@ -66,7 +81,7 @@ def read_local_file(path, name, keys):
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise EnvironmentError(f"{name} must be a regular file readable only by you (chmod 600).")
-    stored = dotenv_values(path)
+    stored = dotenv_values(path, interpolate=False)
     if any(not isinstance(stored.get(key), str) or not stored[key] for key in keys):
         raise EnvironmentError(f"{name} is incomplete. Run local-env.py --seed with 1Password unlocked.")
     return {key: stored[key] for key in keys}
@@ -110,14 +125,14 @@ def seed_local_file(service, root=ROOT):
     if not gitignored(path, root):
         raise EnvironmentError(f"{local} is not gitignored; no secrets were written.")
     values = read_mounts(root, config["sources"])
-    previous = dotenv_values(path) if path.exists() else {}
+    previous = dotenv_values(path, interpolate=False) if path.exists() else {}
     temporary = path.with_name(path.name + ".tmp")
     temporary.unlink(missing_ok=True)
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as handle:
         handle.write(f"# Copied from 1Password by local-env.py --seed {service}. Owner-only; never commit.\n")
         handle.writelines(f"{key}={quoted(values[key])}\n" for key in keys)
-    if dotenv_values(temporary) != {key: values[key] for key in keys}:
+    if dotenv_values(temporary, interpolate=False) != {key: values[key] for key in keys}:
         temporary.unlink()
         raise EnvironmentError("A secret did not survive the round trip; nothing was replaced.")
     os.replace(temporary, path)
@@ -125,12 +140,12 @@ def seed_local_file(service, root=ROOT):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run a Brain or data command using local secrets.")
+    parser = argparse.ArgumentParser(description="Run a service with its assigned RockyGPT secrets.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--snapshot", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--seed", action="store_true",
                       help="copy the service's secrets from 1Password into its local file, then exit")
-    parser.add_argument("service", choices=["brain", "data"])
+    parser.add_argument("service", choices=["brain", "data", "dev-production"])
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.seed:
