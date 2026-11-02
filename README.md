@@ -118,11 +118,19 @@ before treating it as a gap.
 ## Running the stack
 
     ./run-local.sh start          # brain :8000, student ui :3000, dev ui :3100
+    ./run-local.sh start --like-prod   # the student ui built and served as Vercel serves it
     ./run-local.sh status         # what is up, and whether it is ready
     ./run-local.sh logs brain     # or `ui`, or `dev`
     ./run-local.sh stop
 
-`start` first combines and validates the Brain's settings and secrets, then clears ports
+`start` first checks the Brain's virtualenv against production: the Python version the
+Dockerfile names and every package in `rockygpt-brain/requirements.lock`. Different
+packages are installed from the lock on the spot; a different Python stops the start with
+the command that recreates `.venv`. `--like-prod` runs `next build` and `next start` for the
+student UI instead of `next dev`, so it has production's React, security headers, splash and
+saved chats; use plain `start` while editing UI code, since a build does not reload.
+
+`start` then combines and validates the Brain's settings and secrets, then clears ports
 3000, 3100 and 8000 and waits for each service to answer. The Brain reads
 `rockygpt-brain/.env.local`, or its 1Password sources when that file is absent; both web clients are pointed at the
 local Brain automatically. The local Brain is bound to loopback and does not
