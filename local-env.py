@@ -195,7 +195,7 @@ def main():
     os.chdir(ROOT / config["directory"])
     os.environ.update(values)
     if args.service == "brain":
-        for key in ("STAGING_SERVICE_TOKEN", "OPENAI_CHAT_MODEL", "BRAIN_EXPECTED_CONFIG_HASH"):
+        for key in ("SERVICE_TOKEN", "STAGING_SERVICE_TOKEN", "OPENAI_CHAT_MODEL", "BRAIN_EXPECTED_CONFIG_HASH"):
             os.environ.pop(key, None)
         os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     os.execvp(command[0], command)

@@ -98,6 +98,7 @@ start() {
       printf '%s' "$brain_values" | PYTHONPATH=src nohup .venv/bin/python -c '
 import json, os, sys
 os.environ.update(json.load(sys.stdin))
+os.environ.pop("SERVICE_TOKEN", None)
 os.environ.pop("STAGING_SERVICE_TOKEN", None)
 os.environ.pop("OPENAI_CHAT_MODEL", None)
 os.environ.pop("BRAIN_EXPECTED_CONFIG_HASH", None)
@@ -120,12 +121,12 @@ os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
         || { echo "  ${c_bad}✗${c_off} ui build failed — see $LOGS/ui-build.log"; return 1; }
       ( use_node22; cd "$UI_DIR"
         export BRAIN_URL=http://127.0.0.1:8000 NODE_ENV=production
-        unset STAGING_SERVICE_TOKEN
+        unset SERVICE_TOKEN STAGING_SERVICE_TOKEN
         nohup "$UI_DIR/node_modules/.bin/next" start -p 3000 -H 127.0.0.1 >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
     else
       ( use_node22; cd "$UI_DIR"
         export BRAIN_URL=http://127.0.0.1:8000
-        unset STAGING_SERVICE_TOKEN
+        unset SERVICE_TOKEN STAGING_SERVICE_TOKEN
         nohup npm run dev >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
     fi
     wait_for 3000 ui 90 || return 1
@@ -136,7 +137,7 @@ os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
     if [ -d "$DEV_DIR/node_modules" ]; then
       ( use_node22; cd "$DEV_DIR"
         export BRAIN_URL=http://127.0.0.1:8000
-        unset STAGING_SERVICE_TOKEN
+        unset SERVICE_TOKEN STAGING_SERVICE_TOKEN
         nohup npm run dev >"$LOGS/dev.log" 2>&1 & echo $! >"$PIDS/dev.pid" )
       wait_for 3100 dev 90 || return 1
     else

@@ -50,7 +50,7 @@ only the assigned values into the variable names its service expects.
 | `PRODUCTION_LEDGER_DATABASE_URL` | Production Brain → `BRAIN_LEDGER_DATABASE_URL` |
 | `PRODUCTION_SERVICE_TOKEN` | Production Brain, student UI, production-connected dev UI → `STAGING_SERVICE_TOKEN` |
 | `BRAIN_OPENAI_API_KEY` | Local and production Brain |
-| `BRAIN_TYPESAFE_API_KEY` | Data page check, evals grader, dev Feedback page → `TYPESAFE_API_KEY` (the Brain no longer reads it) |
+| `TYPESAFE_API_KEY` | Data page check, evals grader, dev Feedback page (Jev) |
 | `ABUSE_HASH_KEY` | Production student UI |
 | `RAW_ARTIFACT_ACCESS_KEY_ID`, `RAW_ARTIFACT_SECRET_ACCESS_KEY` | Data publishing |
 | `RENDER_API_KEY`, `VERCEL_TOKEN`, `GITHUB_SECRETS_TOKEN` | Production environment sync only |
