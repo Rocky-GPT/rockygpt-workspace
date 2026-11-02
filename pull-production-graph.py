@@ -12,7 +12,13 @@ The release files go in first and `active.json` is renamed into place last, so a
 sees either the old release or the whole new one. The previous release's files are kept until
 the next install, because a running Brain may still be reading them.
 
-    python3 pull-production-graph.py DIR        download if newer, else keep DIR as it is
+    python3 pull-production-graph.py DIR             download if newer, else keep DIR as it is
+    python3 pull-production-graph.py DIR --force     download production's copy again and replace
+    python3 pull-production-graph.py DIR --events    also print each step as a JSON line (the dev
+                                                     UI's "Sync from production" button reads them)
+
+It downloads from GitHub, never from the production database, so it costs no Neon transfer.
+`./run-local.sh sync-prod` runs it; `start` does not, so the copy changes only when asked.
 
 Uses the `gh` CLI, signed in as someone who can read Rocky-GPT/rockygpt-data's Actions. When the
 download fails (offline, signed out) and DIR already holds a copy, that copy is used.
@@ -25,6 +31,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+from typing import Callable
+import zipfile
 
 REPOSITORY = "Rocky-GPT/rockygpt-data"
 ARTIFACT = "production-graph"
@@ -34,6 +44,18 @@ MARKER = "artifact.json"
 
 class PullError(Exception):
     """Why the copy could not be refreshed."""
+
+
+Emit = Callable[..., None]
+
+
+def quiet(step: str, **_: object) -> None:
+    """The default: no step events."""
+
+
+def json_events(step: str, **fields: object) -> None:
+    """One JSON line per step on stdout, flushed so a reader sees it at once."""
+    print(json.dumps({"step": step, **fields}), flush=True)
 
 
 def latest_artifact() -> dict:
@@ -48,7 +70,46 @@ def latest_artifact() -> dict:
         raise PullError(f"No unexpired {ARTIFACT} artifact: the daily data run has not shared one yet.")
     newest = max(artifacts, key=lambda a: a["created_at"])
     return {"id": newest["id"], "created_at": newest["created_at"],
-            "run_id": newest["workflow_run"]["id"]}
+            "run_id": newest["workflow_run"]["id"], "size_in_bytes": newest.get("size_in_bytes")}
+
+
+def download_zip(artifact: dict, zip_path: Path, emit: Emit) -> None:
+    """Stream the artifact's zip into zip_path, reporting the bytes received as they arrive."""
+    total = artifact.get("size_in_bytes")
+    with zip_path.open("wb") as out:
+        process = subprocess.Popen(
+            ["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
+            stdout=out, stderr=subprocess.PIPE, text=True)
+        errors: list[str] = []
+        reader = threading.Thread(target=lambda: errors.append(process.stderr.read()), daemon=True)
+        reader.start()
+        deadline = time.monotonic() + 600
+        while process.poll() is None:
+            if time.monotonic() > deadline:
+                process.kill()
+                raise PullError("The download took longer than 10 minutes.")
+            emit("downloading", received=zip_path.stat().st_size, total=total)
+            time.sleep(0.5)
+        reader.join(5)
+    if process.returncode != 0:
+        raise PullError(f"gh could not download the artifact: {''.join(errors).strip()[:200]}")
+    emit("downloading", received=zip_path.stat().st_size, total=total)
+
+
+def extract(zip_path: Path, folder: Path) -> None:
+    """Unpack the artifact's files (flat names only) into folder."""
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            for member in archive.infolist():
+                name = member.filename
+                if member.is_dir():
+                    continue
+                if Path(name).name != name or name.startswith("."):
+                    raise PullError(f"The artifact holds an unexpected path: {name[:80]}")
+                with archive.open(member) as source, (folder / name).open("wb") as target:
+                    shutil.copyfileobj(source, target)
+    except zipfile.BadZipFile as error:
+        raise PullError("The downloaded artifact is not a readable zip.") from error
 
 
 def release_stem(pointer: dict) -> str:
@@ -82,49 +143,66 @@ def install(download: Path, target: Path, artifact: dict) -> str:
     return pointer.get("dataset_version", stem)
 
 
-def pull(target: Path) -> str:
+def pull(target: Path, force: bool = False, emit: Emit = quiet) -> str:
     current = None
     if (target / MARKER).is_file():
         current = json.loads((target / MARKER).read_text())
+    emit("checking")
     try:
         artifact = latest_artifact()
     except (PullError, OSError, subprocess.TimeoutExpired, ValueError, KeyError) as error:
-        if current and (target / POINTER).is_file():
+        if current and (target / POINTER).is_file() and not force:
             return f"kept the local copy from {current['created_at']} ({error})"
         raise PullError(str(error)) from error
-    if current and current.get("id") == artifact["id"] and (target / POINTER).is_file():
+    emit("found", shared=artifact["created_at"], total=artifact.get("size_in_bytes"))
+    if (not force and current and current.get("id") == artifact["id"]
+            and (target / POINTER).is_file()):
         return f"up to date (production data from {artifact['created_at']})"
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target.parent) as temp:
-        result = subprocess.run(
-            ["gh", "run", "download", str(artifact["run_id"]), "-R", REPOSITORY,
-             "-n", ARTIFACT, "-D", temp], capture_output=True, text=True, timeout=600)
-        if result.returncode != 0:
-            if current and (target / POINTER).is_file():
+        folder = Path(temp) / "files"
+        folder.mkdir()
+        try:
+            download_zip(artifact, Path(temp) / "artifact.zip", emit)
+        except (PullError, OSError) as error:
+            if current and (target / POINTER).is_file() and not force:
                 return f"kept the local copy from {current['created_at']} (download failed)"
-            raise PullError(f"gh could not download the artifact: {result.stderr.strip()[:200]}")
-        version = install(Path(temp), target, artifact)
+            raise PullError(str(error)) from error
+        emit("installing")
+        extract(Path(temp) / "artifact.zip", folder)
+        version = install(folder, target, artifact)
     return f"installed production release {version} (shared {artifact['created_at']})"
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    flags = {arg for arg in argv[1:] if arg.startswith("--")}
+    paths = [arg for arg in argv[1:] if not arg.startswith("--")]
+    if len(paths) != 1 or flags - {"--force", "--events"}:
         print(__doc__.strip().splitlines()[0], file=sys.stderr)
-        print("usage: pull-production-graph.py DIR", file=sys.stderr)
+        print("usage: pull-production-graph.py DIR [--force] [--events]", file=sys.stderr)
         return 2
+    target, force = Path(paths[0]), "--force" in flags
+    emit = json_events if "--events" in flags else quiet
     if not shutil.which("gh"):
-        target = Path(argv[1])
-        if (target / POINTER).is_file():
+        if (target / POINTER).is_file() and not force:
             print("production data: gh is not installed; kept the local copy")
             return 0
-        print("production data: install the gh CLI and sign in (gh auth login) to download it",
-              file=sys.stderr)
+        message = "install the gh CLI and sign in (gh auth login) to download it"
+        emit("error", message=message)
+        print(f"production data: {message}", file=sys.stderr)
         return 1
     try:
-        print(f"production data: {pull(Path(argv[1]))}")
-    except PullError as error:
+        message = pull(target, force, emit)
+    except (PullError, OSError) as error:
+        emit("error", message=str(error))
         print(f"production data: {error}", file=sys.stderr)
         return 1
+    release = None
+    if (target / POINTER).is_file():
+        release = json.loads((target / POINTER).read_text()).get("dataset_version")
+    emit("done", message=message, release=release)
+    if not flags & {"--events"}:
+        print(f"production data: {message}")
     return 0
 
 

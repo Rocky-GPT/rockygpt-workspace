@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location(
@@ -71,18 +72,50 @@ class PullProductionGraphTests(unittest.TestCase):
         with offline:
             self.assertIn("kept the local copy", PULL.pull(self.target))
 
+    def fake_download(self, stem, version):
+        """Stands in for download_zip: writes a zip of a release, as GitHub serves the artifact."""
+        def download(artifact, zip_path, emit):
+            files = self.root / f"zip-{stem}"
+            release(files, stem, version)
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                for item in files.iterdir():
+                    archive.write(item, item.name)
+            emit("downloading", received=zip_path.stat().st_size, total=artifact.get("size_in_bytes"))
+        return download
+
     def test_a_newer_artifact_is_downloaded_and_installed(self):
         self.install("release-aaa", "v1", 7)
-
-        def download(args, **_):
-            release(Path(args[args.index("-D") + 1]), "release-bbb", "v2")
-            return subprocess.CompletedProcess(args, 0, "", "")
-
+        steps = []
         with patch.object(PULL, "latest_artifact", return_value={"id": 8, "created_at": "t2", "run_id": 5}), \
-                patch.object(PULL.subprocess, "run", side_effect=download):
-            self.assertIn("installed production release v2", PULL.pull(self.target))
+                patch.object(PULL, "download_zip", side_effect=self.fake_download("release-bbb", "v2")):
+            message = PULL.pull(self.target, emit=lambda step, **_: steps.append(step))
+        self.assertIn("installed production release v2", message)
+        self.assertEqual(steps, ["checking", "found", "downloading", "installing"])
         self.assertEqual(json.loads((self.target / "active.json").read_text())["file"], "release-bbb.lbug")
 
+    def test_force_replaces_the_copy_even_when_it_is_the_same_artifact(self):
+        self.install("release-aaa", "v1", 7)
+        with patch.object(PULL, "latest_artifact", return_value={"id": 7, "created_at": "t", "run_id": 1}), \
+                patch.object(PULL, "download_zip", side_effect=self.fake_download("release-aaa", "v1")) as download:
+            self.assertIn("installed production release v1", PULL.pull(self.target, force=True))
+        download.assert_called_once()
+
+    def test_force_reports_a_failure_instead_of_keeping_the_old_copy(self):
+        self.install("release-aaa", "v1", 7)
+        with patch.object(PULL, "latest_artifact", side_effect=PULL.PullError("offline")):
+            with self.assertRaises(PULL.PullError):
+                PULL.pull(self.target, force=True)
+        self.assertEqual(json.loads((self.target / "active.json").read_text())["file"], "release-aaa.lbug")
+
+    def test_a_zip_with_a_path_inside_is_refused(self):
+        zip_path = self.root / "bad.zip"
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("../escape.lbug", "x")
+        folder = self.root / "out"
+        folder.mkdir()
+        with self.assertRaises(PULL.PullError):
+            PULL.extract(zip_path, folder)
+        self.assertFalse((self.root / "escape.lbug").exists())
 
 if __name__ == "__main__":
     unittest.main()

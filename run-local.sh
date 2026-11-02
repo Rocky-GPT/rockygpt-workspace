@@ -5,8 +5,8 @@
 #   Dev UI      :3100  ->  brain :8000  ->  production's campus data (local copy)
 #
 # The Brain serves a one-way copy of what production serves: the release graph and
-# meaning index the daily data run shares (pull-production-graph.py), refreshed on
-# start when production has a newer one. It reads no campus database, and local-env.py
+# meaning index the daily data run shares (pull-production-graph.py). The copy changes only
+# when you run `sync-prod`, never on start. It reads no campus database, and local-env.py
 # gives it production's public settings, so local answers match production's.
 #
 # Two products, one backend. The dev app is a separate interface, not a mode of
@@ -14,6 +14,8 @@
 #
 #   ./run-local.sh start     start everything, wait until healthy
 #   ./run-local.sh start --like-prod   the student UI as Vercel serves it (built, not dev mode)
+#   ./run-local.sh sync-prod replace the local copy with production's latest data (only
+#                            when you run it; a running Brain switches to it by itself)
 #   ./run-local.sh stop      stop everything
 #   ./run-local.sh restart
 #   ./run-local.sh status    show what is up
@@ -87,6 +89,22 @@ match_production_brain() {
   return 1
 }
 
+# The release the local copy holds, as its active.json names it.
+local_release() {
+  python3 -c 'import json, sys
+p = json.load(open(sys.argv[1]))
+print(p.get("dataset_version") or "unknown release")' \
+    "$GRAPH_DIR/active.json" 2>/dev/null || echo "unknown release"
+}
+
+# Replaces the local copy with the release production serves (the newest production-graph
+# artifact). A running Brain picks up the new active.json on its own.
+sync_prod() {
+  echo "copying production's data to this laptop (from GitHub, not the database)"
+  python3 "$ROOT/pull-production-graph.py" "$GRAPH_DIR" --force || return 1
+  echo "  ${c_ok}✓${c_off} data: $(local_release)"
+}
+
 start() {
   local like_prod=0
   [ "${1:-}" = "--like-prod" ] && like_prod=1
@@ -95,8 +113,12 @@ start() {
   # Read the Brain's secrets (its local file, else 1Password) before stopping a working stack.
   local brain_values
   brain_values="$("$BRAIN_DIR/.venv/bin/python" "$ROOT/local-env.py" --snapshot brain)" || return 1
-  # Production's data, downloaded only when production shared a newer release.
-  python3 "$ROOT/pull-production-graph.py" "$GRAPH_DIR" || return 1
+  # Production's data is copied only by `sync-prod`, by hand; start serves the copy already here.
+  if [ ! -f "$GRAPH_DIR/active.json" ]; then
+    echo "  ${c_bad}✗${c_off} no local copy of production's data yet: run ./run-local.sh sync-prod"
+    return 1
+  fi
+  echo "  ${c_dim}· data: $(local_release) (refresh with ./run-local.sh sync-prod)${c_off}"
   kill_ports
 
   # --- brain :8000 (read secrets once, then inherit values across reloads) ---
@@ -198,7 +220,8 @@ case "${1:-start}" in
   stop)    stop ;;
   restart) start "${2:-}" ;;
   status)  status ;;
+  sync-prod) sync_prod ;;
   logs)    logs "${2:-brain}" ;;
   preview) preview "${2:-}" ;;
-  *) echo "usage: $0 {start|restart [--like-prod]|stop|status|logs [brain|ui|dev]|preview}"; exit 1 ;;
+  *) echo "usage: $0 {start|restart [--like-prod]|sync-prod|stop|status|logs [brain|ui|dev]|preview}"; exit 1 ;;
 esac
