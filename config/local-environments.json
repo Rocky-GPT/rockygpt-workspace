@@ -2,11 +2,12 @@
   "brain": {
     "directory": "rockygpt-brain",
     "local_file": "rockygpt-brain/.env.local",
+    "production_settings": {
+      "file": "rockygpt-infra/config/environment-sync.json",
+      "target": "brain-production"
+    },
     "settings": {
-      "BRAIN_ENVIRONMENT": "development",
-      "BRAIN_OPENAI_PROJECT": "proj_aMhXgndK2e9EUQZpXbLFh4yV",
-      "BRAIN_ROUTING_MODE": "active",
-      "BRAIN_ROUTING_PROVIDER": "typesafe"
+      "BRAIN_ENVIRONMENT": "development"
     },
     "sources": [
       {
@@ -37,9 +38,11 @@
   },
   "dev-production": {
     "directory": "rockygpt-dev",
-    "settings": {
-      "BRAIN_URL": "https://rockygpt-brain.onrender.com"
+    "production_settings": {
+      "file": "rockygpt-infra/config/environment-sync.json",
+      "target": "ui-production"
     },
+    "settings": {},
     "sources": [
       {
         "path": "~/.config/rockygpt/rockygpt.env",
