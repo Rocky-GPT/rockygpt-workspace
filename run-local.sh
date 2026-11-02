@@ -4,9 +4,10 @@
 #   Student UI  :3000  ->  brain :8000  ->  production's campus data (local copy)
 #   Dev UI      :3100  ->  brain :8000  ->  production's campus data (local copy)
 #
-# The Brain serves a one-way copy of what production serves: the release graph and
-# meaning index the daily data run shares (pull-production-graph.py). The copy changes only
-# when you run `sync-prod`, never on start. It reads no campus database, and local-env.py
+# The Brain serves the very file production's Brain serves: the release graph and meaning
+# index the daily data run puts in the file store (pull-production-graph.py downloads it with
+# the Brain's own graph_sync code). The copy changes only when you run `sync-prod`, never on
+# start; production's Brain follows the store by itself. It reads no campus database, and local-env.py
 # gives it production's public settings, so local answers match production's.
 #
 # Two products, one backend. The dev app is a separate interface, not a mode of
@@ -97,10 +98,10 @@ print(p.get("dataset_version") or "unknown release")' \
     "$GRAPH_DIR/active.json" 2>/dev/null || echo "unknown release"
 }
 
-# Replaces the local copy with the release production serves (the newest production-graph
-# artifact). A running Brain picks up the new active.json on its own.
+# Replaces the local copy with the release production serves (the file store's brain-graph/).
+# A running Brain picks up the new active.json on its own.
 sync_prod() {
-  echo "copying production's data to this laptop (from GitHub, not the database)"
+  echo "copying production's data to this laptop (from the file store, not the database)"
   python3 "$ROOT/pull-production-graph.py" "$GRAPH_DIR" --force || return 1
   echo "  ${c_ok}✓${c_off} data: $(local_release)"
 }
