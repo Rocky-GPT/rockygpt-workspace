@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a local service command with repository settings and local secrets.
+"""Run a local service command with production's public settings and local secrets.
 
 Use the Brain virtualenv's Python. A service whose config names a `local_file`
 reads its secrets from that owner-only, gitignored file, so unattended runs
@@ -23,7 +23,10 @@ import time
 from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parent
-PUBLIC_SETTINGS = {"BRAIN_ENVIRONMENT", "BRAIN_OPENAI_PROJECT", "BRAIN_ROUTING_MODE", "BRAIN_ROUTING_PROVIDER", "BRAIN_URL"}
+# Public settings come from production's manifest (rockygpt-infra/config/environment-sync.json),
+# so the laptop and production cannot drift apart. These are the only names the laptop may
+# change, each on purpose: the local Brain must run as development.
+LOCAL_OVERRIDES = {"BRAIN_ENVIRONMENT"}
 
 
 class EnvironmentError(Exception):
@@ -45,12 +48,38 @@ def source_mapping(source):
     return keys
 
 
+def production_settings(root, reference):
+    """The public settings production runs with, read from rockygpt-infra's sync manifest."""
+    if not reference:
+        return {}
+    path = root / reference["file"]
+    try:
+        targets = json.loads(path.read_text())["targets"]
+    except FileNotFoundError:
+        raise EnvironmentError(f"{reference['file']} is missing; clone rockygpt-infra beside this "
+                               "workspace so the laptop uses production's settings.") from None
+    except (ValueError, KeyError, TypeError):
+        raise EnvironmentError(f"{reference['file']} could not be read.") from None
+    matches = [t for t in targets if isinstance(t, dict) and t.get("name") == reference["target"]]
+    settings = matches[0].get("settings") if len(matches) == 1 else None
+    if not isinstance(settings, dict) or not settings or any(
+        not isinstance(key, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key)
+        or not isinstance(value, str) or not value for key, value in settings.items()
+    ):
+        raise EnvironmentError(f"Production settings for {reference['target']} are missing or invalid.")
+    return settings
+
+
 def service_config(service, root=ROOT):
     config = json.loads((root / "config/local-environments.json").read_text())[service]
-    settings, sources = config["settings"], config["sources"]
+    overrides, sources = config["settings"], config["sources"]
     keys = [key for source in sources for key in source_mapping(source)]
-    if set(settings) - PUBLIC_SETTINGS or set(settings) & set(keys):
-        raise EnvironmentError("Local settings contain an unapproved or conflicting variable.")
+    if set(overrides) - LOCAL_OVERRIDES:
+        raise EnvironmentError("Local settings may only override " + ", ".join(sorted(LOCAL_OVERRIDES))
+                               + "; put shared settings in rockygpt-infra/config/environment-sync.json.")
+    settings = production_settings(root, config.get("production_settings")) | overrides
+    if set(settings) & set(keys):
+        raise EnvironmentError("A public setting has the same name as a secret.")
     if service == "brain" and settings.get("BRAIN_ENVIRONMENT") != "development":
         raise EnvironmentError("The local stack requires BRAIN_ENVIRONMENT=development.")
     if service == "brain" and not settings.get("BRAIN_OPENAI_PROJECT"):
@@ -59,7 +88,7 @@ def service_config(service, root=ROOT):
         raise EnvironmentError("The local secret list is invalid.")
     if any(not isinstance(value, str) or not value for value in settings.values()):
         raise EnvironmentError("A local setting is missing or empty.")
-    return config, keys
+    return config | {"settings": settings}, keys
 
 
 def read_mounts(root, sources):

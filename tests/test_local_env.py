@@ -11,6 +11,17 @@ SPEC = importlib.util.spec_from_file_location("local_env", Path(__file__).resolv
 LOCAL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(LOCAL)
 
+MANIFEST = "infra/environment-sync.json"
+PRODUCTION = {"file": MANIFEST, "target": "brain-production"}
+
+
+def write_manifest(root, brain=None, ui=None):
+    (root / "infra").mkdir(exist_ok=True)
+    (root / MANIFEST).write_text(json.dumps({"targets": [
+        {"name": "brain-production", "settings": brain or {
+            "BRAIN_ENVIRONMENT": "production", "BRAIN_OPENAI_PROJECT": "project"}},
+        {"name": "ui-production", "settings": ui or {"BRAIN_URL": "https://brain.example"}}]}))
+
 
 class LocalEnvironmentTests(unittest.TestCase):
     def setUp(self):
@@ -18,8 +29,9 @@ class LocalEnvironmentTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "config").mkdir()
-        self.config = {"brain": {"directory": "brain", "settings": {
-            "BRAIN_ENVIRONMENT": "development", "BRAIN_OPENAI_PROJECT": "project"},
+        write_manifest(self.root)
+        self.config = {"brain": {"directory": "brain", "production_settings": PRODUCTION,
+            "settings": {"BRAIN_ENVIRONMENT": "development"},
             "sources": [{"path": ".env.shared", "keys": ["BRAIN_OPENAI_API_KEY"]}]}}
 
     def load(self, source):
@@ -49,9 +61,31 @@ class LocalEnvironmentTests(unittest.TestCase):
         with self.assertRaises(LOCAL.EnvironmentError):
             self.load({})
 
+    def test_production_manifest_cannot_shadow_a_secret(self):
+        write_manifest(self.root, brain={"BRAIN_OPENAI_PROJECT": "project", "BRAIN_OPENAI_API_KEY": "x"})
+        with self.assertRaisesRegex(LOCAL.EnvironmentError, "same name as a secret"):
+            self.load({"BRAIN_OPENAI_API_KEY": "secret"})
+
     def test_missing_public_project_is_rejected(self):
-        del self.config["brain"]["settings"]["BRAIN_OPENAI_PROJECT"]
+        write_manifest(self.root, brain={"BRAIN_OUTPUT": "written"})
         with self.assertRaises(LOCAL.EnvironmentError):
+            self.load({"BRAIN_OPENAI_API_KEY": "secret"})
+
+    def test_brain_gets_every_production_setting_except_its_environment(self):
+        write_manifest(self.root, brain={"BRAIN_ENVIRONMENT": "production", "BRAIN_OPENAI_PROJECT": "project",
+                                         "BRAIN_OUTPUT": "written", "BRAIN_SOMETHING_NEW": "1"})
+        self.assertEqual(self.load({"BRAIN_OPENAI_API_KEY": "secret"}), {
+            "BRAIN_ENVIRONMENT": "development", "BRAIN_OPENAI_PROJECT": "project",
+            "BRAIN_OUTPUT": "written", "BRAIN_SOMETHING_NEW": "1", "BRAIN_OPENAI_API_KEY": "secret"})
+
+    def test_laptop_cannot_quietly_change_a_production_setting(self):
+        self.config["brain"]["settings"]["BRAIN_OUTPUT"] = "text"
+        with self.assertRaisesRegex(LOCAL.EnvironmentError, "environment-sync.json"):
+            self.load({"BRAIN_OPENAI_API_KEY": "secret"})
+
+    def test_missing_infra_checkout_stops_instead_of_using_defaults(self):
+        (self.root / MANIFEST).unlink()
+        with self.assertRaisesRegex(LOCAL.EnvironmentError, "rockygpt-infra"):
             self.load({"BRAIN_OPENAI_API_KEY": "secret"})
 
     def test_shared_source_cannot_replace_local_database(self):
@@ -86,7 +120,8 @@ class LocalEnvironmentTests(unittest.TestCase):
             self.load({"DATABASE_URL": "wrong-db", "PRODUCTION_DATABASE_URL": "production-db"})
 
     def test_production_dev_ui_receives_only_its_token_and_address(self):
-        self.config["dev-production"] = {"directory": "dev", "settings": {"BRAIN_URL": "https://brain.example"},
+        self.config["dev-production"] = {"directory": "dev", "settings": {},
+            "production_settings": {"file": MANIFEST, "target": "ui-production"},
             "sources": [{"path": "all.env", "keys": {"STAGING_SERVICE_TOKEN": "PRODUCTION_SERVICE_TOKEN"}}]}
         (self.root / "config/local-environments.json").write_text(json.dumps(self.config))
         with patch.object(LOCAL, "dotenv_values", return_value={"PRODUCTION_SERVICE_TOKEN": "token",
@@ -104,9 +139,10 @@ class LocalFileTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "config").mkdir()
         (self.root / "brain").mkdir()
+        write_manifest(self.root)
         (self.root / "config/local-environments.json").write_text(json.dumps({"brain": {
-            "directory": "brain", "local_file": "brain/.env.local",
-            "settings": {"BRAIN_ENVIRONMENT": "development", "BRAIN_OPENAI_PROJECT": "project"},
+            "directory": "brain", "local_file": "brain/.env.local", "production_settings": PRODUCTION,
+            "settings": {"BRAIN_ENVIRONMENT": "development"},
             "sources": [{"path": "brain/.env", "keys": ["DATABASE_URL"]},
                         {"path": ".env.shared", "keys": ["BRAIN_OPENAI_API_KEY"]}]}}))
         self.local = self.root / "brain/.env.local"
