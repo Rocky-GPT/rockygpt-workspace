@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # RockyGPT local stack.
 #
-#   Student UI  :3000  ->  brain :8000  ->  Neon
-#   Dev UI      :3100  ->  brain :8000  ->  Neon
+#   Student UI  :3000  ->  brain :8000  ->  production's campus data (local copy)
+#   Dev UI      :3100  ->  brain :8000  ->  production's campus data (local copy)
+#
+# The Brain serves a one-way copy of what production serves: the release graph and
+# meaning index the daily data run shares (pull-production-graph.py), refreshed on
+# start when production has a newer one. It reads no campus database, and it uses
+# production's output settings, so local answers match production's.
 #
 # Two products, one backend. The dev app is a separate interface, not a mode of
 # the student one, so it is a separate process here too.
@@ -29,6 +34,7 @@ mkdir -p "$LOGS" "$PIDS"
 BRAIN_DIR="$ROOT/rockygpt-brain"
 UI_DIR="$ROOT/rockygpt-ui"
 DEV_DIR="$ROOT/rockygpt-dev"
+GRAPH_DIR="$LOGS/production-graph"
 
 c_ok=$'\033[32m'; c_bad=$'\033[31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
 
@@ -65,6 +71,8 @@ start() {
   # Read the Brain's secrets (its local file, else 1Password) before stopping a working stack.
   local brain_values
   brain_values="$("$BRAIN_DIR/.venv/bin/python" "$ROOT/local-env.py" --snapshot brain)" || return 1
+  # Production's data, downloaded only when production shared a newer release.
+  python3 "$ROOT/pull-production-graph.py" "$GRAPH_DIR" || return 1
   kill_ports
 
   # --- brain :8000 (read secrets once, then inherit values across reloads) ---
@@ -78,8 +86,18 @@ os.environ.pop("STAGING_SERVICE_TOKEN", None)
 os.environ.pop("OPENAI_CHAT_MODEL", None)
 os.environ.pop("BRAIN_EXPECTED_CONFIG_HASH", None)
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+# Serve the local copy of production'"'"'s data, the way production words its answers.
+os.environ["BRAIN_GRAPH_ONLY_DIR"] = sys.argv.pop(1)
+try:
+    targets = json.load(open(sys.argv.pop(1)))["targets"]
+    production = next(t for t in targets if t["name"] == "brain-production")["settings"]
+    for key in ("BRAIN_OUTPUT", "BRAIN_HOWTO_ONE_CALL", "BRAIN_WRITER_MAX_OUTPUT_TOKENS"):
+        if key in production:
+            os.environ[key] = production[key]
+except (OSError, ValueError, KeyError, StopIteration):
+    print("brain: production output settings not found; using the Brain defaults", file=sys.stderr)
 os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
-' \
+' "$GRAPH_DIR" "$ROOT/rockygpt-infra/config/environment-sync.json" \
         rockygpt_brain.api.app:app --host 127.0.0.1 --port 8000 \
         --reload --reload-dir src --reload-include '*.md' \
         >"$LOGS/brain.log" 2>&1 & echo $! >"$PIDS/brain.pid" )
