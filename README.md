@@ -120,6 +120,8 @@ before treating it as a gap.
     ./run-local.sh start          # brain :8000, student ui :3000, dev ui :3100
     ./run-local.sh start --like-prod   # the student ui built and served as Vercel serves it
     ./run-local.sh status         # what is up, and whether it is ready
+    ./run-local.sh sync-prod      # replace the local campus data with production's (by hand only;
+                                  # also the "Sync from production" button on the dev UI's Release page)
     ./run-local.sh logs brain     # or `ui`, or `dev`
     ./run-local.sh stop
 
