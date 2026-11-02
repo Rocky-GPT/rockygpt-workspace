@@ -30,8 +30,14 @@ database — every fact arrives over HTTP from the brain.
     # rockygpt-dev has no remote yet
 
 Keep `.env.example` files as configuration templates. 1Password stores active
-credentials, while `config/local-environments.json` stores public local settings.
-The production equivalent is `rockygpt-infra/config/environment-sync.json`.
+credentials. Public settings have one home, production's manifest
+`rockygpt-infra/config/environment-sync.json`: the local Brain gets every setting
+the production Brain gets, and the production-connected dev UI gets the student
+UI's `BRAIN_URL`. `config/local-environments.json` points at that manifest and may
+override only `BRAIN_ENVIRONMENT` (always `development` locally). A setting added
+to production reaches the laptop on its next start; to try a new setting, add it to
+the manifest on rockygpt-infra's `dev` branch. Without a rockygpt-infra checkout
+beside this workspace the launcher stops rather than guessing.
 All project credentials live in one 1Password Environment, **RockyGPT**. Local
 and production database connections have explicit names; each launcher maps
 only the assigned values into the variable names its service expects.
@@ -47,7 +53,7 @@ only the assigned values into the variable names its service expects.
 | `VOYAGE_API_KEY` | Local Brain |
 | `ABUSE_HASH_KEY` | Production student UI |
 | `RAW_ARTIFACT_ACCESS_KEY_ID`, `RAW_ARTIFACT_SECRET_ACCESS_KEY` | Data publishing |
-| `RENDER_API_KEY`, `VERCEL_TOKEN` | Production environment sync only |
+| `RENDER_API_KEY`, `VERCEL_TOKEN`, `GITHUB_SECRETS_TOKEN` | Production environment sync only |
 
 Connect one **Local .env file** destination in 1Password:
 `~/.config/rockygpt/rockygpt.env`. This is a named pipe in an owner-only directory,
@@ -87,22 +93,44 @@ data commands can supply their database directly:
 Keep 1Password running and approve its prompt when a mount is first read;
 authorization lasts until 1Password locks. Data's storage keys are used by artifact
 publishing when its bucket is configured.
-Environment names, project IDs, and routing settings belong in the JSON config.
+Environment names, project IDs and Brain switches belong in rockygpt-infra's manifest.
 The model comes from the Brain's versioned release, not an environment override.
 Python requires `python-dotenv` 1.2 or newer for this launcher.
-Edit credentials in 1Password or settings in the config, then restart affected
+Edit credentials in 1Password or settings in the manifest, then restart affected
 processes. Do not open a mounted
 file in an editor while a service is reading it: simultaneous reads are not
 supported. See [1Password's local file documentation](https://www.1password.dev/environments/local-env-file).
 
+## Comparing the laptop with production
+
+    rockygpt-brain/.venv/bin/python compare-production.py           # 10 questions
+    rockygpt-brain/.venv/bin/python compare-production.py --limit 3
+
+Asks the laptop Brain (:8000) and the production Brain the same questions at the
+same time and lists every question whose status, dataset version, facts or cited
+links differ; wording is shown but not judged. The question list is
+`config/compare-questions.txt`. Each question costs a few cents on each side, and
+production's share is charged to production's ledger. The production token is read
+through `local-env.py dev-production`. Full answers go to `.local-logs/compare-*.md`.
+A facts mismatch can be the model picking a different lookup: ask that question again
+before treating it as a gap.
+
 ## Running the stack
 
     ./run-local.sh start          # brain :8000, student ui :3000, dev ui :3100
+    ./run-local.sh start --like-prod   # the student ui built and served as Vercel serves it
     ./run-local.sh status         # what is up, and whether it is ready
     ./run-local.sh logs brain     # or `ui`, or `dev`
     ./run-local.sh stop
 
-`start` first combines and validates the Brain's settings and secrets, then clears ports
+`start` first checks the Brain's virtualenv against production: the Python version the
+Dockerfile names and every package in `rockygpt-brain/requirements.lock`. Different
+packages are installed from the lock on the spot; a different Python stops the start with
+the command that recreates `.venv`. `--like-prod` runs `next build` and `next start` for the
+student UI instead of `next dev`, so it has production's React, security headers, splash and
+saved chats; use plain `start` while editing UI code, since a build does not reload.
+
+`start` then combines and validates the Brain's settings and secrets, then clears ports
 3000, 3100 and 8000 and waits for each service to answer. The Brain reads
 `rockygpt-brain/.env.local`, or its 1Password sources when that file is absent; both web clients are pointed at the
 local Brain automatically. The local Brain is bound to loopback and does not

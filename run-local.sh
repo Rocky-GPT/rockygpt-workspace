@@ -13,6 +13,7 @@
 # the student one, so it is a separate process here too.
 #
 #   ./run-local.sh start     start everything, wait until healthy
+#   ./run-local.sh start --like-prod   the student UI as Vercel serves it (built, not dev mode)
 #   ./run-local.sh stop      stop everything
 #   ./run-local.sh restart
 #   ./run-local.sh status    show what is up
@@ -66,8 +67,31 @@ kill_ports() {
   fi
 }
 
+# The Brain's Python and packages must be production's: the Dockerfile's Python and
+# rockygpt-brain/requirements.lock. Packages are installed from the lock when they differ;
+# a different Python stops the start, because only recreating .venv fixes it.
+match_production_brain() {
+  local check="$BRAIN_DIR/scripts/check_environment.py" py="$BRAIN_DIR/.venv/bin/python"
+  [ -f "$check" ] || return 0   # a Brain checkout from before the lock
+  "$py" "$check" >/dev/null 2>&1 && return 0
+  if "$py" "$check" 2>/dev/null | grep -q '^Python '; then
+    echo "  ${c_bad}✗${c_off} brain venv: $("$py" "$check" | grep '^Python ')"
+    echo "    recreate it: cd rockygpt-brain && rm -rf .venv && python3.13 -m venv .venv && ../run-local.sh start"
+    return 1
+  fi
+  echo "  ${c_dim}· brain packages differ from production; installing requirements.lock${c_off}"
+  "$py" -m pip install -q --require-hashes -r "$BRAIN_DIR/requirements.lock" >"$LOGS/brain-install.log" 2>&1 \
+    && "$py" "$check" >/dev/null 2>&1 && return 0
+  echo "  ${c_bad}✗${c_off} brain packages still differ from production; see $LOGS/brain-install.log"
+  "$py" "$check" | sed 's/^/    /'
+  return 1
+}
+
 start() {
+  local like_prod=0
+  [ "${1:-}" = "--like-prod" ] && like_prod=1
   echo "starting RockyGPT local stack"
+  match_production_brain || return 1
   # Read the Brain's secrets (its local file, else 1Password) before stopping a working stack.
   local brain_values
   brain_values="$("$BRAIN_DIR/.venv/bin/python" "$ROOT/local-env.py" --snapshot brain)" || return 1
@@ -108,11 +132,23 @@ os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
   fi
 
   # --- ui :3000 (local Brain is bound to loopback without a staging token) ---
+  # --like-prod builds and serves it the way Vercel does: production React, strict security
+  # headers, the splash and saved chats. Without it, `next dev` reloads on every edit.
   if port_up 3000; then echo "  ${c_dim}· ui already up${c_off}"; else
-    ( use_node22; cd "$UI_DIR"
-      export BRAIN_URL=http://127.0.0.1:8000
-      unset STAGING_SERVICE_TOKEN
-      nohup npm run dev >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
+    if [ "$like_prod" = 1 ]; then
+      echo "  ${c_dim}· building the student ui as production does${c_off}"
+      ( use_node22; cd "$UI_DIR" && BRAIN_URL=http://127.0.0.1:8000 npm run build >"$LOGS/ui-build.log" 2>&1 ) \
+        || { echo "  ${c_bad}✗${c_off} ui build failed — see $LOGS/ui-build.log"; return 1; }
+      ( use_node22; cd "$UI_DIR"
+        export BRAIN_URL=http://127.0.0.1:8000 NODE_ENV=production
+        unset STAGING_SERVICE_TOKEN
+        nohup "$UI_DIR/node_modules/.bin/next" start -p 3000 -H 127.0.0.1 >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
+    else
+      ( use_node22; cd "$UI_DIR"
+        export BRAIN_URL=http://127.0.0.1:8000
+        unset STAGING_SERVICE_TOKEN
+        nohup npm run dev >"$LOGS/ui.log" 2>&1 & echo $! >"$PIDS/ui.pid" )
+    fi
     wait_for 3000 ui 90 || return 1
   fi
 
@@ -130,7 +166,7 @@ os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
   fi
 
   echo
-  echo "  ${c_ok}student  http://localhost:3000${c_off}"
+  echo "  ${c_ok}student  http://localhost:3000${c_off}$([ "$like_prod" = 1 ] && echo "  (production build)")"
   echo "  ${c_ok}dev      http://localhost:3100${c_off}"
   echo "  ${c_dim}logs: ./run-local.sh logs brain|ui|dev${c_off}"
 }
@@ -164,14 +200,14 @@ logs() { tail -f "$LOGS/${1:-brain}.log"; }
 # Used by .claude/launch.json. Brings the stack up (skipping whatever is
 # already up), then stays in the foreground streaming the UI log, so the
 # preview pane has a live process to own and its logs to show.
-preview() { start && tail -f "$LOGS/ui.log"; }
+preview() { start "${1:-}" && tail -f "$LOGS/ui.log"; }
 
 case "${1:-start}" in
-  start)   start ;;
+  start)   start "${2:-}" ;;
   stop)    stop ;;
-  restart) start ;;
+  restart) start "${2:-}" ;;
   status)  status ;;
   logs)    logs "${2:-brain}" ;;
-  preview) preview ;;
-  *) echo "usage: $0 {start|stop|restart|status|logs [brain|ui]|preview}"; exit 1 ;;
+  preview) preview "${2:-}" ;;
+  *) echo "usage: $0 {start|restart [--like-prod]|stop|status|logs [brain|ui|dev]|preview}"; exit 1 ;;
 esac
