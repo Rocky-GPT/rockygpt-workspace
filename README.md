@@ -53,7 +53,7 @@ only the assigned values into the variable names its service expects.
 | `VOYAGE_API_KEY` | Local Brain |
 | `ABUSE_HASH_KEY` | Production student UI |
 | `RAW_ARTIFACT_ACCESS_KEY_ID`, `RAW_ARTIFACT_SECRET_ACCESS_KEY` | Data publishing |
-| `RENDER_API_KEY`, `VERCEL_TOKEN` | Production environment sync only |
+| `RENDER_API_KEY`, `VERCEL_TOKEN`, `GITHUB_SECRETS_TOKEN` | Production environment sync only |
 
 Connect one **Local .env file** destination in 1Password:
 `~/.config/rockygpt/rockygpt.env`. This is a named pipe in an owner-only directory,
