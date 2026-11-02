@@ -1,64 +1,49 @@
-# RockyGPT AI Agent Instructions (Codex)
+# RockyGPT AI Agent Instructions
 
-Welcome to RockyGPT. This root `AGENTS.md` is the master instruction guide for AI agents working across the workspace.
+This root `AGENTS.md` is the instruction guide for AI agents working across the workspace.
 
 ---
 
-## 1. Git Branching Rules (Strictly Enforced)
+## 1. Git Branching Rules (Laptop)
 
-- **NEVER create new git branches** (no `git checkout -b`, no `codex/...`, `feature/...`, or `chore/...` branches).
-- Work must always be committed and pushed directly to:
-  - **`dev`** for all service repositories (`rockygpt-brain`, `rockygpt-ui`, `rockygpt-data`, `rockygpt-dev`, `rockygpt-evals`, `rockygpt-infra`).
-  - **`main`** for the root workspace repository (`RockyGPT`).
-- Always remain on the active branch. Do not switch branches unless explicitly requested by the user.
+- On the laptop, **don't create new git branches**.
+- Commit and push directly to:
+  - **`dev`** for the service repos (`rockygpt-brain`, `rockygpt-ui`, `rockygpt-data`, `rockygpt-dev`, `rockygpt-evals`, `rockygpt-infra`).
+  - **`main`** for this root workspace repo (`rockygpt-workspace`).
+- Stay on the active branch unless asked to switch.
 
 ---
 
 ## 2. Workspace Architecture
 
-The workspace consists of 6 standalone services coordinated by this root tooling repo:
+This root tooling repo coordinates 6 service repos:
 
-| Directory | Role | Stack | Active Branch | Primary Test Command |
+| Directory | Role | Stack | Branch | Check |
 | :--- | :--- | :--- | :--- | :--- |
-| **`rockygpt-brain`** | Core engine, evidence gating, budget accounting | Python 3.13, FastAPI, Postgres | `dev` | `.venv/bin/pytest` |
+| **`rockygpt-brain`** | Answer engine, campus graph, budget ledger | Python 3.13, FastAPI, Postgres | `dev` | `.venv/bin/pytest` |
 | **`rockygpt-ui`** | Student-facing chat UI | Next.js, React, TypeScript | `dev` | `npm run lint` |
-| **`rockygpt-dev`** | Internal developer inspection UI | Next.js, React, TypeScript | `dev` | `npm run dev` |
-| **`rockygpt-data`** | Campus data ingestion and database schemas | Node.js, TypeScript, PostgreSQL | `dev` | `npm run build` |
-| **`rockygpt-evals`** | Evaluation benchmarks and acceptance suites | Node.js / Python | `dev` | `npm run test:all` |
-| **`rockygpt-infra`** | Deployment manifests, operational storage | Docker, Terraform | `dev` | — |
+| **`rockygpt-dev`** | Internal developer UI | Next.js, React, TypeScript | `dev` | `npm run lint` |
+| **`rockygpt-data`** | Campus data collection and publishing | Node.js, TypeScript, PostgreSQL | `dev` | `npm run build` |
+| **`rockygpt-evals`** | Evaluation sets and runners | Python / Node.js | `dev` | `brain-reset/run.py` |
+| **`rockygpt-infra`** | Docker files, settings sync, deploy scripts | Docker, Python | `dev` | — |
 
 ---
 
 ## 3. Core Development Principles
 
-- **Zero Hallucination / Evidence Grounding**: The brain must strictly answer based on retrieved verified database evidence. Do not extrapolate unverified claims, ranks, or official campus authority.
-- **First Principles**: Keep architectures simple and modular. Do not introduce premature abstractions, complex agent graphs, or extra layers until a concrete measured failure demands it.
-- **Entity Facts Are Shared**: Normal application and Brain fact reads must resolve a canonical entity and use the shared entity-fact reader in `rockygpt-brain/src/rockygpt_brain/retrieval/entity_facts.py`. Source collections are discovery and provenance, not competing attribute authorities. Keep all supporting evidence, explicit conflicts/unknowns, and dated record boundaries. Do not reconcile or infer fact values independently in a UI. See `rockygpt-brain/docs/entity-facts.md` for the contract and permitted source-format normalization.
-- **Do what is asked, then stop**: Focus strictly on the user's immediate request without gratuitous refactoring.
+- **Graph-only campus facts**: the Brain may answer campus questions only from facts in the campus graph. Never make up a fact. Non-campus replies (greetings, the date, emergency numbers, "which office?") may be fixed code.
+- **Code writes answers where it can**: prefer code-written answers over AI-written ones, so the same question gets the same answer every time.
+- **First Principles**: keep the design simple. Don't add abstractions or extra layers until a real measured failure needs them.
+- **Entity Facts Are Shared**: Brain and app fact reads resolve a canonical entity and use the shared reader in `rockygpt-brain/src/rockygpt_brain/retrieval/entity_facts.py`. Don't reconcile fact values separately in a UI. See `rockygpt-brain/docs/entity-facts.md`.
+- **Do what is asked, then stop**: no extra refactoring beyond the request.
 
-### Service-Specific Rules:
-
-#### `rockygpt-brain` (Clean-Room Implementation)
-- Do not read, inspect, copy, reference, or reuse old RockyGPT v1 branches, commits, tags, tests, prompts, or architecture unless explicitly asked.
-- Build one small step at a time from first principles.
-
-#### `rockygpt-ui` & `rockygpt-dev` (Next.js Framework Guidance)
-- The Next.js version in this workspace has breaking changes and updated conventions compared to older training data.
-- Read the bundled documentation in `node_modules/next/dist/docs/` before writing frontend code.
+### `rockygpt-ui` & `rockygpt-dev` (Next.js)
+- This Next.js version has breaking changes compared to older training data. Read `node_modules/next/dist/docs/` before writing frontend code.
 
 ---
 
-## 4. Running the Local Environment
+## 4. Running and Testing Locally
 
-- **Run the full stack locally**:
-  ```bash
-  ./run-local.sh
-  ```
-- **CLI orchestration tool**:
-  ```bash
-  ./rocky --help
-  ```
-- **Testing the Brain**:
-  ```bash
-  cd rockygpt-brain && .venv/bin/pytest
-  ```
+- Run the full stack: `./run-local.sh`
+- Ask the Brain a question (use this for testing): `./rocky ask "question"` (laptop) or `./rocky ask "question" --prod` (live website). See `./rocky --help`.
+- Brain unit tests: `cd rockygpt-brain && .venv/bin/pytest`
