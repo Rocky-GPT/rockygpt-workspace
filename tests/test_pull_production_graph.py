@@ -1,10 +1,6 @@
 import importlib.util
-import json
 from pathlib import Path
-import subprocess
-import tempfile
 import unittest
-import zipfile
 from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location(
@@ -13,109 +9,24 @@ PULL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PULL)
 
 
-def release(folder: Path, stem: str, version: str) -> None:
-    """A downloaded artifact: a release file, its meaning index and the pointer naming it."""
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{stem}.lbug").write_text(version)
-    (folder / f"{stem}.meaning.json").write_text("{}")
-    (folder / f"{stem}.meaning.f32").write_bytes(b"\0")
-    (folder / "active.json").write_text(json.dumps({"file": f"{stem}.lbug", "dataset_version": version}))
-
-
 class PullProductionGraphTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.target = self.root / "production-graph"
+    def test_it_runs_the_brains_own_download_code_with_the_graph_sync_secrets(self):
+        command = PULL.command(Path("/tmp/copy"), ["--force", "--events"])
+        self.assertEqual(command[1:4], [str(PULL.ROOT / "local-env.py"), "graph-sync", "--"])
+        self.assertEqual(command[5:8], ["-m", "rockygpt_brain.retrieval.graph_sync", "/tmp/copy"])
+        self.assertEqual(command[-2:], ["--force", "--events"])
 
-    def install(self, stem, version, artifact_id):
-        download = self.root / f"download-{artifact_id}"
-        release(download, stem, version)
-        return PULL.install(download, self.target, {"id": artifact_id, "created_at": "t", "run_id": 1})
+    def test_unknown_flags_are_refused(self):
+        self.assertEqual(PULL.main(["pull", "DIR", "--everything"]), 2)
+        self.assertEqual(PULL.main(["pull"]), 2)
 
-    def test_install_serves_the_new_release_and_keeps_only_the_previous_one(self):
-        self.assertEqual(self.install("release-aaa", "v1", 1), "v1")
-        self.install("release-bbb", "v2", 2)
-        self.install("release-ccc", "v3", 3)
-        pointer = json.loads((self.target / "active.json").read_text())
-        self.assertEqual(pointer["file"], "release-ccc.lbug")
-        names = sorted(p.name for p in self.target.iterdir() if p.name.startswith("release-"))
-        self.assertEqual(names, ["release-bbb.lbug", "release-bbb.meaning.f32", "release-bbb.meaning.json",
-                                 "release-ccc.lbug", "release-ccc.meaning.f32", "release-ccc.meaning.json"])
-        self.assertEqual(json.loads((self.target / "artifact.json").read_text())["id"], 3)
-
-    def test_a_pointer_naming_a_path_or_a_missing_file_is_refused(self):
-        bad = self.root / "bad"
-        release(bad, "release-aaa", "v1")
-        (bad / "active.json").write_text(json.dumps({"file": "../etc/passwd"}))
-        with self.assertRaises(PULL.PullError):
-            PULL.install(bad, self.target, {"id": 1})
-        (bad / "active.json").write_text(json.dumps({"file": "release-zzz.lbug"}))
-        with self.assertRaises(PULL.PullError):
-            PULL.install(bad, self.target, {"id": 1})
-        self.assertFalse((self.target / "active.json").exists())
-
-    def test_the_same_artifact_is_not_downloaded_again(self):
-        self.install("release-aaa", "v1", 7)
-        with patch.object(PULL, "latest_artifact", return_value={"id": 7, "created_at": "t", "run_id": 1}), \
+    def test_the_child_gets_the_brain_source_on_its_path(self):
+        with patch.object(PULL.Path, "is_file", return_value=True), \
                 patch.object(PULL.subprocess, "run") as run:
-            self.assertIn("up to date", PULL.pull(self.target))
-        run.assert_not_called()
+            run.return_value.returncode = 0
+            self.assertEqual(PULL.main(["pull", "DIR"]), 0)
+        self.assertEqual(run.call_args.kwargs["env"]["PYTHONPATH"], str(PULL.BRAIN / "src"))
 
-    def test_offline_keeps_an_existing_copy_and_fails_without_one(self):
-        offline = patch.object(PULL, "latest_artifact", side_effect=PULL.PullError("offline"))
-        with offline:
-            with self.assertRaises(PULL.PullError):
-                PULL.pull(self.target)
-        self.install("release-aaa", "v1", 7)
-        with offline:
-            self.assertIn("kept the local copy", PULL.pull(self.target))
-
-    def fake_download(self, stem, version):
-        """Stands in for download_zip: writes a zip of a release, as GitHub serves the artifact."""
-        def download(artifact, zip_path, emit):
-            files = self.root / f"zip-{stem}"
-            release(files, stem, version)
-            with zipfile.ZipFile(zip_path, "w") as archive:
-                for item in files.iterdir():
-                    archive.write(item, item.name)
-            emit("downloading", received=zip_path.stat().st_size, total=artifact.get("size_in_bytes"))
-        return download
-
-    def test_a_newer_artifact_is_downloaded_and_installed(self):
-        self.install("release-aaa", "v1", 7)
-        steps = []
-        with patch.object(PULL, "latest_artifact", return_value={"id": 8, "created_at": "t2", "run_id": 5}), \
-                patch.object(PULL, "download_zip", side_effect=self.fake_download("release-bbb", "v2")):
-            message = PULL.pull(self.target, emit=lambda step, **_: steps.append(step))
-        self.assertIn("installed production release v2", message)
-        self.assertEqual(steps, ["checking", "found", "downloading", "installing"])
-        self.assertEqual(json.loads((self.target / "active.json").read_text())["file"], "release-bbb.lbug")
-
-    def test_force_replaces_the_copy_even_when_it_is_the_same_artifact(self):
-        self.install("release-aaa", "v1", 7)
-        with patch.object(PULL, "latest_artifact", return_value={"id": 7, "created_at": "t", "run_id": 1}), \
-                patch.object(PULL, "download_zip", side_effect=self.fake_download("release-aaa", "v1")) as download:
-            self.assertIn("installed production release v1", PULL.pull(self.target, force=True))
-        download.assert_called_once()
-
-    def test_force_reports_a_failure_instead_of_keeping_the_old_copy(self):
-        self.install("release-aaa", "v1", 7)
-        with patch.object(PULL, "latest_artifact", side_effect=PULL.PullError("offline")):
-            with self.assertRaises(PULL.PullError):
-                PULL.pull(self.target, force=True)
-        self.assertEqual(json.loads((self.target / "active.json").read_text())["file"], "release-aaa.lbug")
-
-    def test_a_zip_with_a_path_inside_is_refused(self):
-        zip_path = self.root / "bad.zip"
-        with zipfile.ZipFile(zip_path, "w") as archive:
-            archive.writestr("../escape.lbug", "x")
-        folder = self.root / "out"
-        folder.mkdir()
-        with self.assertRaises(PULL.PullError):
-            PULL.extract(zip_path, folder)
-        self.assertFalse((self.root / "escape.lbug").exists())
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,5 +49,22 @@
         }
       }
     ]
+  },
+  "graph-sync": {
+    "directory": "rockygpt-brain",
+    "production_settings": {
+      "file": "rockygpt-infra/config/environment-sync.json",
+      "target": "brain-production"
+    },
+    "settings": {},
+    "sources": [
+      {
+        "path": "~/.config/rockygpt/rockygpt.env",
+        "keys": {
+          "BRAIN_GRAPH_STORE_ACCESS_KEY_ID": "RAW_ARTIFACT_ACCESS_KEY_ID",
+          "BRAIN_GRAPH_STORE_SECRET_ACCESS_KEY": "RAW_ARTIFACT_SECRET_ACCESS_KEY"
+        }
+      }
+    ]
   }
 }

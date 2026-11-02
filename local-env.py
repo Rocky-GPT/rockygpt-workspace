@@ -27,6 +27,10 @@ ROOT = Path(__file__).resolve().parent
 # so the laptop and production cannot drift apart. These are the only names the laptop may
 # change, each on purpose: the local Brain must run as development.
 LOCAL_OVERRIDES = {"BRAIN_ENVIRONMENT"}
+# Production's Brain follows the shared release graph in the file store by itself. The laptop's
+# copy changes only when Dan syncs it (service `graph-sync`, pull-production-graph.py), so the
+# laptop Brain gets no store settings and serves the folder run-local.sh names.
+BRAIN_ONLY_IN_PRODUCTION = ("BRAIN_GRAPH_ONLY_DIR", "BRAIN_GRAPH_STORE_")
 
 
 class EnvironmentError(Exception):
@@ -78,6 +82,9 @@ def service_config(service, root=ROOT):
         raise EnvironmentError("Local settings may only override " + ", ".join(sorted(LOCAL_OVERRIDES))
                                + "; put shared settings in rockygpt-infra/config/environment-sync.json.")
     settings = production_settings(root, config.get("production_settings")) | overrides
+    if service == "brain":
+        settings = {key: value for key, value in settings.items()
+                    if not key.startswith(BRAIN_ONLY_IN_PRODUCTION)}
     if set(settings) & set(keys):
         raise EnvironmentError("A public setting has the same name as a secret.")
     if service == "brain" and settings.get("BRAIN_ENVIRONMENT") != "development":
@@ -174,7 +181,7 @@ def main():
     mode.add_argument("--snapshot", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--seed", action="store_true",
                       help="copy the service's secrets from 1Password into its local file, then exit")
-    parser.add_argument("service", choices=["brain", "data", "dev-production"])
+    parser.add_argument("service", choices=["brain", "data", "dev-production", "graph-sync"])
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.seed:

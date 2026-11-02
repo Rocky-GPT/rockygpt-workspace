@@ -78,6 +78,22 @@ class LocalEnvironmentTests(unittest.TestCase):
             "BRAIN_ENVIRONMENT": "development", "BRAIN_OPENAI_PROJECT": "project",
             "BRAIN_OUTPUT": "written", "BRAIN_SOMETHING_NEW": "1", "BRAIN_OPENAI_API_KEY": "secret"})
 
+    def test_laptop_brain_does_not_follow_the_file_store_but_graph_sync_reads_it(self):
+        store = {"BRAIN_GRAPH_ONLY_DIR": "/tmp/rockygpt-graph", "BRAIN_GRAPH_STORE_BUCKET": "bucket",
+                 "BRAIN_GRAPH_STORE_ENDPOINT": "https://store.example"}
+        write_manifest(self.root, brain={"BRAIN_ENVIRONMENT": "production",
+                                         "BRAIN_OPENAI_PROJECT": "project", **store})
+        brain = self.load({"BRAIN_OPENAI_API_KEY": "secret"})
+        self.assertFalse([key for key in brain if key.startswith("BRAIN_GRAPH")])
+        self.config["graph-sync"] = {"directory": "brain", "production_settings": PRODUCTION,
+            "settings": {}, "sources": [{"path": ".env.shared", "keys": {
+                "BRAIN_GRAPH_STORE_ACCESS_KEY_ID": "RAW_ARTIFACT_ACCESS_KEY_ID"}}]}
+        (self.root / "config/local-environments.json").write_text(json.dumps(self.config))
+        with patch.object(LOCAL, "dotenv_values", return_value={"RAW_ARTIFACT_ACCESS_KEY_ID": "k"}):
+            values = LOCAL.load_environment("graph-sync", self.root)
+        self.assertEqual(values["BRAIN_GRAPH_STORE_BUCKET"], "bucket")
+        self.assertEqual(values["BRAIN_GRAPH_STORE_ACCESS_KEY_ID"], "k")
+
     def test_laptop_cannot_quietly_change_a_production_setting(self):
         self.config["brain"]["settings"]["BRAIN_OUTPUT"] = "text"
         with self.assertRaisesRegex(LOCAL.EnvironmentError, "environment-sync.json"):
