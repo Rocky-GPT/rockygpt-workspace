@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Ask the Brain through the Dev UI using the public messages contract."""
+"""Ask RockyGPT a question from the command line, through a website's chat API.
+
+By default it asks the laptop's dev UI. --student asks the laptop's student UI,
+and --prod asks the real website, the same way a student's browser does."""
 
 import argparse
 import json
@@ -46,11 +49,25 @@ def save_history(path, messages):
         temporary.unlink(missing_ok=True)
 
 
-def ask(question, history):
-    endpoint = os.environ.get("ROCKY_DEV_UI", "http://localhost:3100").rstrip("/")
+# Where each target's chat API lives. The student site (laptop or production)
+# serves /api/chat; the dev UI serves /api/brain/chat. All take {"messages": [...]}
+# and return the Brain's JSON answer.
+TARGETS = {
+    "dev": (lambda: os.environ.get("ROCKY_DEV_UI", "http://localhost:3100"), "/api/brain/chat"),
+    "student": (lambda: os.environ.get("ROCKY_STUDENT_UI", "http://localhost:3000"), "/api/chat"),
+    "prod": (lambda: os.environ.get("ROCKY_PROD_SITE", "https://rockygpt.danielrajakumar.com"), "/api/chat"),
+}
+
+
+def chat_url(target="dev"):
+    base, path = TARGETS[target]
+    return base().rstrip("/") + path
+
+
+def ask(question, history, target="dev"):
     messages = [*history, {"role": "user", "content": question}]
     request = Request(
-        endpoint + "/api/brain/chat",
+        chat_url(target),
         data=json.dumps({"messages": messages}).encode(),
         headers={"content-type": "application/json", "accept": "application/json"},
     )
@@ -81,12 +98,19 @@ def print_response(payload, raw=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    where = argparse.ArgumentParser(add_help=False)
+    which = where.add_mutually_exclusive_group()
+    which.add_argument("--prod", dest="target", action="store_const", const="prod",
+                       help="ask the real website (rockygpt.danielrajakumar.com)")
+    which.add_argument("--student", dest="target", action="store_const", const="student",
+                       help="ask the laptop's student UI (localhost:3000)")
+    where.set_defaults(target="dev")
     commands = parser.add_subparsers(dest="command", required=True)
-    one = commands.add_parser("ask", help="ask one student question")
+    one = commands.add_parser("ask", parents=[where], help="ask one student question")
     one.add_argument("question")
     one.add_argument("--raw", action="store_true", help="print the complete response JSON")
     one.add_argument("--history", type=Path, help="read and update this JSON messages file")
-    bulk = commands.add_parser("bulk", help="ask a sample set or a questions file")
+    bulk = commands.add_parser("bulk", parents=[where], help="ask a sample set or a questions file")
     bulk.add_argument("set", choices=["short", "full", "file"])
     bulk.add_argument("arguments", nargs="*", metavar="PATH_OR_DELAY_MS")
     bulk.add_argument("--history", type=Path, help="preserve and save conversation history")
@@ -97,7 +121,7 @@ def main():
         if args.command == "ask":
             if not args.question.strip():
                 parser.error("question must not be empty")
-            payload, ok = ask(args.question, history)
+            payload, ok = ask(args.question, history, args.target)
             if ok:
                 save_history(args.history, history)
             print_response(payload, args.raw)
@@ -123,7 +147,7 @@ def main():
         questions = [question.strip() for question in questions if question.strip() and not question.lstrip().startswith("#")]
         failures = 0
         for index, question in enumerate(questions, 1):
-            payload, ok = ask(question, history if args.history else [])
+            payload, ok = ask(question, history if args.history else [], args.target)
             failures += not ok
             if ok:
                 save_history(args.history, history)
