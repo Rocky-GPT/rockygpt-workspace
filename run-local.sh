@@ -6,8 +6,8 @@
 #
 # The Brain serves a one-way copy of what production serves: the release graph and
 # meaning index the daily data run shares (pull-production-graph.py), refreshed on
-# start when production has a newer one. It reads no campus database, and it uses
-# production's output settings, so local answers match production's.
+# start when production has a newer one. It reads no campus database, and local-env.py
+# gives it production's public settings, so local answers match production's.
 #
 # Two products, one backend. The dev app is a separate interface, not a mode of
 # the student one, so it is a separate process here too.
@@ -110,21 +110,11 @@ os.environ.pop("STAGING_SERVICE_TOKEN", None)
 os.environ.pop("OPENAI_CHAT_MODEL", None)
 os.environ.pop("BRAIN_EXPECTED_CONFIG_HASH", None)
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
-# Serve the local copy of production'"'"'s data, the way production words its answers and
-# searches the meaning index.
+# Serve the local copy of production'"'"'s data. Production'"'"'s public settings (output,
+# embedding model) already came from local-env.py, which reads rockygpt-infra'"'"'s manifest.
 os.environ["BRAIN_GRAPH_ONLY_DIR"] = sys.argv.pop(1)
-try:
-    targets = json.load(open(sys.argv.pop(1)))["targets"]
-    production = next(t for t in targets if t["name"] == "brain-production")["settings"]
-    for key in ("BRAIN_OUTPUT", "BRAIN_HOWTO_ONE_CALL", "BRAIN_WRITER_MAX_OUTPUT_TOKENS",
-                "BRAIN_OPENAI_EMBED_MODEL", "BRAIN_OPENAI_EMBED_INPUT_NUSD_PER_TOKEN",
-                "BRAIN_OPENAI_EMBED_PRICE_VALID_UNTIL"):
-        if key in production:
-            os.environ[key] = production[key]
-except (OSError, ValueError, KeyError, StopIteration):
-    print("brain: production output settings not found; using the Brain defaults", file=sys.stderr)
 os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
-' "$GRAPH_DIR" "$ROOT/rockygpt-infra/config/environment-sync.json" \
+' "$GRAPH_DIR" \
         rockygpt_brain.api.app:app --host 127.0.0.1 --port 8000 \
         --reload --reload-dir src --reload-include '*.md' \
         >"$LOGS/brain.log" 2>&1 & echo $! >"$PIDS/brain.pid" )
