@@ -122,12 +122,12 @@ class LocalEnvironmentTests(unittest.TestCase):
     def test_production_dev_ui_receives_only_its_token_and_address(self):
         self.config["dev-production"] = {"directory": "dev", "settings": {},
             "production_settings": {"file": MANIFEST, "target": "ui-production"},
-            "sources": [{"path": "all.env", "keys": {"STAGING_SERVICE_TOKEN": "PRODUCTION_SERVICE_TOKEN"}}]}
+            "sources": [{"path": "all.env", "keys": {"SERVICE_TOKEN": "PRODUCTION_SERVICE_TOKEN"}}]}
         (self.root / "config/local-environments.json").write_text(json.dumps(self.config))
         with patch.object(LOCAL, "dotenv_values", return_value={"PRODUCTION_SERVICE_TOKEN": "token",
                                                                "PRODUCTION_LEDGER_DATABASE_URL": "ledger"}):
             self.assertEqual(LOCAL.load_environment("dev-production", self.root),
-                             {"BRAIN_URL": "https://brain.example", "STAGING_SERVICE_TOKEN": "token"})
+                             {"BRAIN_URL": "https://brain.example", "SERVICE_TOKEN": "token"})
 
 
 class LocalFileTests(unittest.TestCase):

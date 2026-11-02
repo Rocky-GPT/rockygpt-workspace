@@ -45,7 +45,7 @@
       {
         "path": "~/.config/rockygpt/rockygpt.env",
         "keys": {
-          "STAGING_SERVICE_TOKEN": "PRODUCTION_SERVICE_TOKEN"
+          "SERVICE_TOKEN": "PRODUCTION_SERVICE_TOKEN"
         }
       }
     ]

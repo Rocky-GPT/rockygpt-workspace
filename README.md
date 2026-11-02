@@ -48,7 +48,7 @@ only the assigned values into the variable names its service expects.
 | `LOCAL_LEDGER_DATABASE_URL` | Local Brain → `BRAIN_LEDGER_DATABASE_URL` |
 | `PRODUCTION_DATABASE_URL` | Data and production Brain → `DATABASE_URL` |
 | `PRODUCTION_LEDGER_DATABASE_URL` | Production Brain → `BRAIN_LEDGER_DATABASE_URL` |
-| `PRODUCTION_SERVICE_TOKEN` | Production Brain, student UI, production-connected dev UI → `STAGING_SERVICE_TOKEN` |
+| `PRODUCTION_SERVICE_TOKEN` | Production Brain, student UI, production-connected dev UI → `SERVICE_TOKEN` |
 | `BRAIN_OPENAI_API_KEY` | Local and production Brain |
 | `TYPESAFE_API_KEY` | Data page check, evals grader, dev Feedback page (Jev) |
 | `ABUSE_HASH_KEY` | Production student UI |
