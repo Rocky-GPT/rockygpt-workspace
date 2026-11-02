@@ -86,12 +86,15 @@ os.environ.pop("STAGING_SERVICE_TOKEN", None)
 os.environ.pop("OPENAI_CHAT_MODEL", None)
 os.environ.pop("BRAIN_EXPECTED_CONFIG_HASH", None)
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
-# Serve the local copy of production'"'"'s data, the way production words its answers.
+# Serve the local copy of production'"'"'s data, the way production words its answers and
+# searches the meaning index.
 os.environ["BRAIN_GRAPH_ONLY_DIR"] = sys.argv.pop(1)
 try:
     targets = json.load(open(sys.argv.pop(1)))["targets"]
     production = next(t for t in targets if t["name"] == "brain-production")["settings"]
-    for key in ("BRAIN_OUTPUT", "BRAIN_HOWTO_ONE_CALL", "BRAIN_WRITER_MAX_OUTPUT_TOKENS"):
+    for key in ("BRAIN_OUTPUT", "BRAIN_HOWTO_ONE_CALL", "BRAIN_WRITER_MAX_OUTPUT_TOKENS",
+                "BRAIN_OPENAI_EMBED_MODEL", "BRAIN_OPENAI_EMBED_INPUT_NUSD_PER_TOKEN",
+                "BRAIN_OPENAI_EMBED_PRICE_VALID_UNTIL"):
         if key in production:
             os.environ[key] = production[key]
 except (OSError, ValueError, KeyError, StopIteration):
