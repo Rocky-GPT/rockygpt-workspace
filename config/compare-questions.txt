@@ -1,0 +1,12 @@
+# One question per line; lines starting with # are ignored.
+# A spread across the Brain's areas, including the 11-01 misses.
+Is there a chess club?
+Who teaches Introduction to Sociology?
+What are the prerequisites for Data Structures?
+When is the Birch Tree Inn open today?
+Where can I park as a commuter student?
+What are the library's hours this week?
+How do I contact the Registrar?
+What is the Public Safety phone number?
+How do I print in color on campus?
+When does the shuttle to the train station run?

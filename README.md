@@ -101,6 +101,20 @@ processes. Do not open a mounted
 file in an editor while a service is reading it: simultaneous reads are not
 supported. See [1Password's local file documentation](https://www.1password.dev/environments/local-env-file).
 
+## Comparing the laptop with production
+
+    rockygpt-brain/.venv/bin/python compare-production.py           # 10 questions
+    rockygpt-brain/.venv/bin/python compare-production.py --limit 3
+
+Asks the laptop Brain (:8000) and the production Brain the same questions at the
+same time and lists every question whose status, dataset version, facts or cited
+links differ; wording is shown but not judged. The question list is
+`config/compare-questions.txt`. Each question costs a few cents on each side, and
+production's share is charged to production's ledger. The production token is read
+through `local-env.py dev-production`. Full answers go to `.local-logs/compare-*.md`.
+A facts mismatch can be the model picking a different lookup: ask that question again
+before treating it as a gap.
+
 ## Running the stack
 
     ./run-local.sh start          # brain :8000, student ui :3000, dev ui :3100
