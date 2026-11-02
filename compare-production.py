@@ -52,7 +52,7 @@ def production_target(root=ROOT):
     launcher = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(launcher)
     values = launcher.load_environment("dev-production", root)
-    return values["BRAIN_URL"].rstrip("/"), values["STAGING_SERVICE_TOKEN"]
+    return values["BRAIN_URL"].rstrip("/"), values.get("SERVICE_TOKEN") or values["STAGING_SERVICE_TOKEN"]
 
 
 def ask(url, question, token=None, timeout=90):
