@@ -27,6 +27,18 @@ class PullProductionGraphTests(unittest.TestCase):
             self.assertEqual(PULL.main(["pull", "DIR"]), 0)
         self.assertEqual(run.call_args.kwargs["env"]["PYTHONPATH"], str(PULL.BRAIN / "src"))
 
+    def test_production_is_read_unless_dev_is_asked_for(self):
+        with patch.object(PULL.Path, "is_file", return_value=True), \
+                patch.dict(PULL.os.environ, {"BRAIN_GRAPH_STORE_PREFIX": "somewhere-else/"}), \
+                patch.object(PULL.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            self.assertEqual(PULL.main(["pull", "DIR"]), 0)
+            self.assertNotIn("BRAIN_GRAPH_STORE_PREFIX", run.call_args.kwargs["env"])
+            self.assertEqual(PULL.main(["pull", "DIR", "--force", "--dev"]), 0)
+            self.assertEqual(run.call_args.kwargs["env"]["BRAIN_GRAPH_STORE_PREFIX"], "brain-graph-dev/")
+            self.assertNotIn("--dev", run.call_args.args[0])
+            self.assertEqual(run.call_args.args[0][-1], "--force")
+
 
 if __name__ == "__main__":
     unittest.main()

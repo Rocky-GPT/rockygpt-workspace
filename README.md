@@ -122,6 +122,9 @@ before treating it as a gap.
     ./run-local.sh status         # what is up, and whether it is ready
     ./run-local.sh sync-prod      # replace the local campus data with production's (by hand only;
                                   # also the "Sync from production" button on the dev UI's Release page)
+    ./run-local.sh sync-dev       # the dev graph instead: dev's code built in the cloud over
+                                  # production's newest pages, whenever data dev or Brain dev changes
+                                  # (rockygpt-data daily-data-update.yml, target dev); sync-prod goes back
     ./run-local.sh logs brain     # or `ui`, or `dev`
     ./run-local.sh stop
 

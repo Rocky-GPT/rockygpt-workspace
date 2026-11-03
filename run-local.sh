@@ -17,6 +17,8 @@
 #   ./run-local.sh start --like-prod   the student UI as Vercel serves it (built, not dev mode)
 #   ./run-local.sh sync-prod replace the local copy with production's latest data (only
 #                            when you run it; a running Brain switches to it by itself)
+#   ./run-local.sh sync-dev  the same, with the dev graph instead: dev's code built in the cloud
+#                            over production's newest pages (sync-prod goes back)
 #   ./run-local.sh stop      stop everything
 #   ./run-local.sh restart
 #   ./run-local.sh status    show what is up
@@ -90,11 +92,14 @@ match_production_brain() {
   return 1
 }
 
-# The release the local copy holds, as its active.json names it.
+# The release the local copy holds, as its active.json names it (a dev build says so).
 local_release() {
   python3 -c 'import json, sys
 p = json.load(open(sys.argv[1]))
-print(p.get("dataset_version") or "unknown release")' \
+b = p.get("build") or {}
+dev = " (dev build: data dev %s, Brain dev %s)" % (b.get("data_commit", "?")[:7], b.get("brain_commit", "?")[:7]) \
+    if b.get("target") == "dev" else ""
+print((p.get("dataset_version") or "unknown release") + dev)' \
     "$GRAPH_DIR/active.json" 2>/dev/null || echo "unknown release"
 }
 
@@ -104,6 +109,15 @@ sync_prod() {
   echo "copying production's data to this laptop (from the file store, not the database)"
   python3 "$ROOT/pull-production-graph.py" "$GRAPH_DIR" --force || return 1
   echo "  ${c_ok}✓${c_off} data: $(local_release)"
+}
+
+# Replaces the local copy with the dev graph: the data workflow builds dev's code over production's
+# newest pages whenever data dev or Brain dev changes and shares it under brain-graph-dev/.
+sync_dev() {
+  echo "copying the dev graph to this laptop (built in the cloud from dev's code)"
+  python3 "$ROOT/pull-production-graph.py" "$GRAPH_DIR" --force --dev || return 1
+  echo "  ${c_ok}✓${c_off} data: $(local_release)"
+  echo "  ${c_dim}· back to production's copy: ./run-local.sh sync-prod${c_off}"
 }
 
 start() {
@@ -222,7 +236,8 @@ case "${1:-start}" in
   restart) start "${2:-}" ;;
   status)  status ;;
   sync-prod) sync_prod ;;
+  sync-dev)  sync_dev ;;
   logs)    logs "${2:-brain}" ;;
   preview) preview "${2:-}" ;;
-  *) echo "usage: $0 {start|restart [--like-prod]|sync-prod|stop|status|logs [brain|ui|dev]|preview}"; exit 1 ;;
+  *) echo "usage: $0 {start|restart [--like-prod]|sync-prod|sync-dev|stop|status|logs [brain|ui|dev]|preview}"; exit 1 ;;
 esac
