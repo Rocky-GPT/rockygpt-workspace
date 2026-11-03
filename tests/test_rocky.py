@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 
@@ -18,10 +19,12 @@ LOADER.exec_module(ROCKY)
 
 class Handler(BaseHTTPRequestHandler):
     seen = []
+    headers = []
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
         Handler.seen.append((self.path, body))
+        Handler.headers.append({key.lower(): value for key, value in self.headers.items()})
         payload = json.dumps({"answer": "Open 8-5.", "status": "complete",
                               "citations": [{"title": "Hours", "url": "https://www.ramapo.edu/a/"}]}).encode()
         self.send_response(200)
@@ -64,6 +67,62 @@ class RockyTests(unittest.TestCase):
             self.assertEqual(Handler.seen, [("/api/chat", {"messages": [{"role": "user", "content": "library hours?"}]})])
         finally:
             server.shutdown()
+
+    def bulk(self, *args, set_dir=None):
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        Handler.seen.clear()
+        Handler.headers.clear()
+        try:
+            out = Path(set_dir) / "out.json"
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "rocky"), "bulk", "file", *args,
+                 "--brain", str(server.server_port), "--out", str(out)],
+                capture_output=True, text=True, timeout=30)
+            return result, (json.loads(out.read_text()) if out.exists() else None)
+        finally:
+            server.shutdown()
+
+    def test_bulk_saves_every_reply_from_a_frozen_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            blob = json.dumps([{"id": "a-1", "area": "howto", "question": "library hours?"},
+                               {"id": "a-2", "area": "people", "question": "who is the registrar?"}])
+            (Path(folder) / "questions-frozen.json").write_text(blob)
+            (Path(folder) / "questions-frozen.sha256").write_text(
+                __import__("hashlib").sha256(blob.encode()).hexdigest() + "  questions-frozen.json\n")
+            result, rows = self.bulk(folder, "--repeat", "2", set_dir=folder)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(sorted((row["id"], row["run"]) for row in rows),
+                             [("a-1", 1), ("a-1", 2), ("a-2", 1), ("a-2", 2)])
+            row = rows[0]
+            self.assertEqual(row["body"]["status"], "complete")
+            self.assertIn("answered_at", row)
+            self.assertIn("seconds", row)
+            self.assertTrue(all(path == "/v1/chat" for path, _ in Handler.seen))
+            self.assertTrue(all(h.get("x-rockygpt-diagnostics") == "1" for h in Handler.headers))
+
+    def test_bulk_refuses_a_changed_frozen_set(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "questions-frozen.json").write_text('[{"id": "a", "question": "q"}]')
+            (Path(folder) / "questions-frozen.sha256").write_text("0" * 64 + "\n")
+            result, rows = self.bulk(folder, set_dir=folder)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("changed since it was frozen", result.stderr)
+            self.assertIsNone(rows)
+            self.assertEqual(Handler.seen, [])
+
+    def test_bulk_feeds_each_answer_back_in_a_conversation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            questions = Path(folder) / "q.txt"
+            questions.write_text("# a comment\nlibrary hours? || and on sunday?\n")
+            result, rows = self.bulk(str(questions), set_dir=folder)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual([row["id"] for row in rows], ["q1"])
+            self.assertEqual(Handler.seen[1][1]["messages"], [
+                {"role": "user", "content": "library hours?"},
+                {"role": "assistant", "content": "Open 8-5."},
+                {"role": "user", "content": "and on sunday?"}])
 
     def test_prod_and_student_cannot_be_combined(self):
         result = subprocess.run([sys.executable, str(ROOT / "rocky"), "ask", "hi", "--prod", "--student"],
