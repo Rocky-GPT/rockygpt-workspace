@@ -2,16 +2,34 @@
 """Ask RockyGPT a question from the command line, through a website's chat API.
 
 By default it asks the laptop's dev UI. --student asks the laptop's student UI,
-and --prod asks the real website, the same way a student's browser does."""
+--prod asks the real website, the same way a student's browser does, and
+--brain PORT asks a laptop Brain straight (with its trace).
+
+`rocky bulk` is the one question runner: every question set, laptop or
+production, once or many times. With --out it saves every full reply as JSON
+rows ({...the case, answered_at, seconds, body}, plus run with --repeat), the
+shape the graders read:
+
+  rocky bulk file rockygpt-evals/fresh-2026-11-03/practice.json --brain 8013 --out run.json
+  rocky bulk file rockygpt-evals/tonight-2026-11-02/blind-four-areas --prod --out live.json
+      (a folder means its questions-frozen.json; a frozen file is checked against its .sha256)
+  rocky bulk file questions.txt --brain 8013 --repeat 5 --out repeat.json
+"""
 
 import argparse
+import collections
+import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -60,33 +78,118 @@ TARGETS = {
 
 
 def chat_url(target="dev"):
+    if target.startswith("brain:"):  # a laptop Brain, straight: --brain PORT
+        return f"http://127.0.0.1:{target.split(':', 1)[1]}/v1/chat"
     base, path = TARGETS[target]
     return base().rstrip("/") + path
 
 
+def headers_for(target):
+    headers = {"content-type": "application/json", "accept": "application/json"}
+    if target.startswith("brain:"):
+        headers["x-rockygpt-diagnostics"] = "1"  # the Brain's trace comes back too
+    else:
+        # One client token per request, like one browser tab each, so a site's per-tab rate
+        # limit doesn't refuse a run of many questions.
+        headers["x-rockygpt-client"] = secrets.token_hex(16)
+    return headers
+
+
 def ask(question, history, target="dev"):
     messages = [*history, {"role": "user", "content": question}]
-    request = Request(
-        chat_url(target),
-        data=json.dumps({"messages": messages}).encode(),
-        headers={"content-type": "application/json", "accept": "application/json"},
-    )
-    try:
-        with urlopen(request, timeout=180) as response:
-            payload = json.load(response)
-    except HTTPError as error:
-        raw = error.read().decode(errors="replace")
+    for attempt in range(4):
+        request = Request(chat_url(target), data=json.dumps({"messages": messages}).encode(),
+                          headers=headers_for(target))
         try:
-            payload = json.loads(raw)
-        except ValueError:
-            payload = {"error": raw[:500]}
-        return {"httpStatus": error.code, "response": payload}, False
-    except (URLError, TimeoutError, OSError, ValueError) as error:
-        return {"error": str(error)}, False
+            with urlopen(request, timeout=180) as response:
+                payload = json.load(response)
+            break
+        except HTTPError as error:
+            if error.code == 429 and attempt < 3:  # rate limited: wait it out, at most 3 times
+                time.sleep(int(error.headers.get("retry-after") or 20))
+                continue
+            raw = error.read().decode(errors="replace")
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                payload = {"error": raw[:500]}
+            return {"httpStatus": error.code, "response": payload}, False
+        except (URLError, TimeoutError, OSError, ValueError) as error:
+            return {"error": str(error)}, False
     if not isinstance(payload, dict) or not isinstance(payload.get("answer"), str) or not payload["answer"].strip():
         return {"error": "The Brain returned an incomplete answer.", "response": payload}, False
     history[:] = [*messages, {"role": "assistant", "content": payload["answer"]}]
     return payload, True
+
+
+def load_cases(path):
+    """A question set as cases: a folder (its questions-frozen.json, hash-checked against
+    questions-frozen.sha256, else questions.json), a JSON list of {"id", "question", ...} or of
+    strings, or a text file with one question per line (# comments skipped). A question with
+    " || " is a conversation: each piece is the next user message."""
+    path = Path(path)
+    if path.is_dir():
+        frozen = path / "questions-frozen.json"
+        path = frozen if frozen.exists() else path / "questions.json"
+    content = path.read_text()
+    digest = path.with_suffix(".sha256")
+    if digest.exists():
+        want = digest.read_text().split()[0]
+        if hashlib.sha256(content.encode()).hexdigest() != want:
+            raise ValueError(f"{path} changed since it was frozen ({digest.name} does not match)")
+    items = json.loads(content) if content.lstrip().startswith("[") else content.splitlines()
+    if not isinstance(items, list):
+        raise ValueError("questions must be a JSON list or one question per line")
+    cases = []
+    for item in items:
+        if isinstance(item, str):
+            if item.strip() and not item.lstrip().startswith("#"):
+                cases.append({"id": f"q{len(cases) + 1}", "question": item.strip()})
+        elif isinstance(item, dict) and isinstance(item.get("question"), str) and item["question"].strip():
+            cases.append(dict(item, id=item.get("id") or f"q{len(cases) + 1}"))
+        else:
+            raise ValueError("each question must be a string or an object with a question")
+    return cases
+
+
+def run_case(case, target):
+    """Ask one case (every turn of a conversation) and keep the last full reply."""
+    history = []
+    answered_at = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    started = time.time()
+    body = {}
+    for turn in case["question"].split(" || "):
+        payload, ok = ask(turn.strip(), history, case["_target"])
+        # A reply with no written answer (a json-output Brain, say) is still the reply to grade.
+        body = payload.get("response", payload) if not ok and "httpStatus" not in payload else payload
+        if not ok:
+            break
+    row = {key: value for key, value in case.items() if key != "_target"}
+    return {**row, "answered_at": answered_at, "seconds": round(time.time() - started, 1), "body": body}
+
+
+def run_to_file(cases, target, out, parallel, repeat):
+    jobs = [dict(case, _target=target, **({"run": run} if repeat > 1 else {}))
+            for run in range(1, repeat + 1) for case in cases]
+    done, lock = [0], threading.Lock()
+
+    def one(case):
+        row = run_case(case, target)
+        with lock:
+            done[0] += 1
+            status = row["body"].get("status") or "ERROR"
+            print(f"{done[0]}/{len(jobs)}  {status:<12} {row['seconds']:>5}s  {row['id']}", flush=True)
+        return row
+
+    with ThreadPoolExecutor(max(1, parallel)) as pool:
+        rows = list(pool.map(one, jobs))
+    Path(out).write_text(json.dumps(rows, indent=1, ensure_ascii=False) + "\n")
+    statuses = collections.Counter(row["body"].get("status") or "ERROR" for row in rows)
+    print(f"\nSaved {len(rows)} replies to {out}: {dict(statuses)}")
+    areas = collections.Counter(row["area"] for row in rows if row.get("area"))
+    for area, count in areas.items():
+        print(f"  {area}: {count}")
+    return 1 if statuses.get("ERROR") else 0
 
 
 def print_response(payload, raw=False):
@@ -104,6 +207,8 @@ def main():
                        help="ask the real website (rockygpt.danielrajakumar.com)")
     which.add_argument("--student", dest="target", action="store_const", const="student",
                        help="ask the laptop's student UI (localhost:3000)")
+    which.add_argument("--brain", dest="target", type=lambda port: f"brain:{int(port)}",
+                       metavar="PORT", help="ask a laptop Brain straight, with its trace (e.g. 8013)")
     where.set_defaults(target="dev")
     commands = parser.add_subparsers(dest="command", required=True)
     one = commands.add_parser("ask", parents=[where], help="ask one student question")
@@ -114,6 +219,10 @@ def main():
     bulk.add_argument("set", choices=["short", "full", "file"])
     bulk.add_argument("arguments", nargs="*", metavar="PATH_OR_DELAY_MS")
     bulk.add_argument("--history", type=Path, help="preserve and save conversation history")
+    bulk.add_argument("--out", type=Path, help="save every full reply as JSON rows (for grading)")
+    bulk.add_argument("--parallel", type=int, default=2, help="questions at a time with --out (default 2)")
+    bulk.add_argument("--repeat", type=int, default=1, help="ask each question this many times (with --out)")
+    bulk.add_argument("--only", help="comma-separated question ids to ask (with --out)")
     args = parser.parse_args()
 
     try:
@@ -135,16 +244,24 @@ def main():
         else:
             name = "short-run-questions.json" if args.set == "short" else "capability-test-questions.json"
             questions_path = ROOT / "rockygpt-dev" / "lib" / name
+        cases = load_cases(questions_path)
+        if args.out:
+            if args.history or arguments:
+                parser.error("--out asks each question on its own; drop --history and the delay")
+            if args.repeat < 1:
+                parser.error("--repeat must be 1 or more")
+            if args.only:
+                wanted = set(args.only.split(","))
+                cases = [case for case in cases if case["id"] in wanted]
+            return run_to_file(cases, args.target, args.out, args.parallel, args.repeat)
+        if args.repeat != 1 or args.only:
+            parser.error("--repeat and --only need --out")
         if len(arguments) > 1:
             parser.error("only one delay in milliseconds is allowed")
         delay = float(arguments[0]) / 1000 if arguments else 0
         if not 0 <= delay < float("inf"):
             parser.error("delay must be finite and nonnegative")
-        content = questions_path.read_text()
-        questions = json.loads(content) if content.lstrip().startswith("[") else content.splitlines()
-        if not isinstance(questions, list) or any(not isinstance(item, str) for item in questions):
-            parser.error("questions must be a JSON string array or one question per line")
-        questions = [question.strip() for question in questions if question.strip() and not question.lstrip().startswith("#")]
+        questions = [case["question"] for case in cases]
         failures = 0
         for index, question in enumerate(questions, 1):
             payload, ok = ask(question, history if args.history else [], args.target)
