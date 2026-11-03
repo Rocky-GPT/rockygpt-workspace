@@ -62,9 +62,13 @@ wait_for() { # wait_for <port> <label> <seconds>
   return 1
 }
 
+# Only this stack's ports, and only what LISTENS on them: other threads run their own test
+# Brains on other ports (:8013, :8033, :8053), and a client that merely talks to :8000 is not ours.
+listeners() { lsof -nP -t -sTCP:LISTEN -iTCP:3000 -iTCP:3100 -iTCP:8000 2>/dev/null || true; }
+
 kill_ports() {
   local pids
-  pids="$(lsof -ti:3000,3100,8000 2>/dev/null || true)"
+  pids="$(listeners)"
   if [ -n "$pids" ]; then
     echo "  ${c_dim}· clearing ports 3000, 3100 & 8000${c_off}"
     echo "$pids" | xargs kill -9 2>/dev/null || true
@@ -201,9 +205,21 @@ os.execv(sys.executable, [sys.executable, "-m", "uvicorn", *sys.argv[1:]])
 
 stop() {
   echo "stopping RockyGPT local stack"
-  pkill -f "uvicorn rockygpt_brain.api.app:app" 2>/dev/null && echo "  · brain stopped"
-  pkill -f "$UI_DIR/node_modules/.bin/next"     2>/dev/null && echo "  · ui stopped"
-  pkill -f "$DEV_DIR/node_modules/.bin/next"    2>/dev/null && echo "  · dev ui stopped"
+  # Only what this script started (its pid files, with their children: the reloader's worker,
+  # npm's next) and whatever still listens on :3000, :3100 and :8000. Never a match by name,
+  # which also killed other threads' test Brains on other ports.
+  local name pid
+  for name in brain ui dev; do
+    [ -f "$PIDS/$name.pid" ] || continue
+    pid="$(cat "$PIDS/$name.pid")"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      pkill -TERM -P "$pid" 2>/dev/null
+      kill "$pid" 2>/dev/null && echo "  · $name stopped"
+    fi
+  done
+  sleep 0.5
+  pid="$(listeners)"
+  [ -n "$pid" ] && echo "$pid" | xargs kill 2>/dev/null
   rm -f "$PIDS"/*.pid
   echo "done"
 }
