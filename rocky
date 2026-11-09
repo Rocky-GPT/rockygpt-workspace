@@ -213,7 +213,9 @@ def main():
                        help="ask the laptop's student UI (localhost:3000)")
     which.add_argument("--brain", dest="target", type=lambda port: f"brain:{int(port)}",
                        metavar="PORT", help="ask a laptop Brain straight, with its trace (e.g. 8013)")
-    where.set_defaults(target="dev")
+    # No flag means the dev UI. It is filled in after parsing, not with set_defaults: argparse
+    # would give the string "dev" to every --target option as its default and run it through
+    # --brain's port check, so `rocky ask "q"` failed before asking anything.
     where.add_argument("--writer", choices=["template", "ai"],
                        help="which writer says the facts (laptop Brain or dev UI only)")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -230,6 +232,7 @@ def main():
     bulk.add_argument("--repeat", type=int, default=1, help="ask each question this many times (with --out)")
     bulk.add_argument("--only", help="comma-separated question ids to ask (with --out)")
     args = parser.parse_args()
+    args.target = args.target or "dev"
     if args.writer and args.target in ("prod", "student"):
         parser.error("--writer is for a laptop Brain or the dev UI; the student site never takes it")
 
