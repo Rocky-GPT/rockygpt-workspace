@@ -68,6 +68,22 @@ class RockyTests(unittest.TestCase):
         finally:
             server.shutdown()
 
+    def test_no_flag_asks_the_dev_ui(self):
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            env = os.environ | {"ROCKY_DEV_UI": f"http://127.0.0.1:{server.server_port}"}
+            Handler.seen.clear()
+            for command in (["ask", "library hours?"], ["ask", "library hours?", "--writer", "ai"]):
+                result = subprocess.run([sys.executable, str(ROOT / "rocky"), *command],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Open 8-5.", result.stdout)
+            self.assertEqual([path for path, _ in Handler.seen], ["/api/brain/chat", "/api/brain/chat"])
+            self.assertEqual(Handler.seen[1][1]["writer"], "ai")
+        finally:
+            server.shutdown()
+
     def bulk(self, *args, set_dir=None):
         server = HTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
