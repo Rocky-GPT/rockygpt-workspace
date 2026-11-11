@@ -17,6 +17,10 @@ shape the graders read:
 
 --writer template|ai picks which writer says the answer's facts for this run, whatever the Brain's
 settings are (a laptop Brain or the dev UI only; the student site never takes it).
+
+--cards asks with the answer cards on for this run, and --no-cards with them off, whatever the
+Brain's BRAIN_CARD_ANSWERS says (a laptop Brain or the dev UI only). A line under the reply says
+whether code answered from a card, and if not, why.
 """
 
 import argparse
@@ -98,9 +102,10 @@ def headers_for(target):
     return headers
 
 
-def ask(question, history, target="dev", writer=None):
+def ask(question, history, target="dev", writer=None, cards=None):
     messages = [*history, {"role": "user", "content": question}]
-    sent = {"messages": messages, **({"writer": writer} if writer else {})}
+    sent = {"messages": messages, **({"writer": writer} if writer else {}),
+            **({"cards": cards} if cards is not None else {})}
     for attempt in range(4):
         request = Request(chat_url(target), data=json.dumps(sent).encode(),
                           headers=headers_for(target))
@@ -163,17 +168,20 @@ def run_case(case, target):
     started = time.time()
     body = {}
     for turn in case["question"].split(" || "):
-        payload, ok = ask(turn.strip(), history, case["_target"], case.get("_writer"))
+        payload, ok = ask(turn.strip(), history, case["_target"], case.get("_writer"),
+                          case.get("_cards"))
         # A reply with no written answer (a json-output Brain, say) is still the reply to grade.
         body = payload.get("response", payload) if not ok and "httpStatus" not in payload else payload
         if not ok:
             break
-    row = {key: value for key, value in case.items() if key not in ("_target", "_writer")}
+    row = {key: value for key, value in case.items()
+           if key not in ("_target", "_writer", "_cards")}
     return {**row, "answered_at": answered_at, "seconds": round(time.time() - started, 1), "body": body}
 
 
-def run_to_file(cases, target, out, parallel, repeat, writer=None):
-    jobs = [dict(case, _target=target, _writer=writer, **({"run": run} if repeat > 1 else {}))
+def run_to_file(cases, target, out, parallel, repeat, writer=None, cards=None):
+    jobs = [dict(case, _target=target, _writer=writer, _cards=cards,
+                 **({"run": run} if repeat > 1 else {}))
             for run in range(1, repeat + 1) for case in cases]
     done, lock = [0], threading.Lock()
 
@@ -218,6 +226,9 @@ def main():
     # --brain's port check, so `rocky ask "q"` failed before asking anything.
     where.add_argument("--writer", choices=["template", "ai"],
                        help="which writer says the facts (laptop Brain or dev UI only)")
+    where.add_argument("--cards", action=argparse.BooleanOptionalAction, default=None,
+                       help="ask with the answer cards on, or off with --no-cards "
+                            "(laptop Brain or dev UI only)")
     commands = parser.add_subparsers(dest="command", required=True)
     one = commands.add_parser("ask", parents=[where], help="ask one student question")
     one.add_argument("question")
@@ -235,13 +246,15 @@ def main():
     args.target = args.target or "dev"
     if args.writer and args.target in ("prod", "student"):
         parser.error("--writer is for a laptop Brain or the dev UI; the student site never takes it")
+    if args.cards is not None and args.target in ("prod", "student"):
+        parser.error("--cards is for a laptop Brain or the dev UI; the student site never takes it")
 
     try:
         history = read_history(args.history)
         if args.command == "ask":
             if not args.question.strip():
                 parser.error("question must not be empty")
-            payload, ok = ask(args.question, history, args.target, args.writer)
+            payload, ok = ask(args.question, history, args.target, args.writer, args.cards)
             if ok:
                 save_history(args.history, history)
             print_response(payload, args.raw)
@@ -264,7 +277,8 @@ def main():
             if args.only:
                 wanted = set(args.only.split(","))
                 cases = [case for case in cases if case["id"] in wanted]
-            return run_to_file(cases, args.target, args.out, args.parallel, args.repeat, args.writer)
+            return run_to_file(cases, args.target, args.out, args.parallel, args.repeat, args.writer,
+                               args.cards)
         if args.repeat != 1 or args.only:
             parser.error("--repeat and --only need --out")
         if len(arguments) > 1:
@@ -275,7 +289,8 @@ def main():
         questions = [case["question"] for case in cases]
         failures = 0
         for index, question in enumerate(questions, 1):
-            payload, ok = ask(question, history if args.history else [], args.target, args.writer)
+            payload, ok = ask(question, history if args.history else [], args.target, args.writer,
+                              args.cards)
             failures += not ok
             if ok:
                 save_history(args.history, history)

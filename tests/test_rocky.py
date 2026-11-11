@@ -157,6 +157,44 @@ class RockyTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("never takes it", result.stderr)
 
+    def test_cards_are_asked_for_or_against_and_refused_for_the_student_site(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "q.txt").write_text("library hours?\n")
+            for flag, sent in (("--cards", True), ("--no-cards", False)):
+                result, rows = self.bulk(str(Path(folder) / "q.txt"), flag, set_dir=folder)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIs(Handler.seen[-1][1]["cards"], sent)
+                self.assertNotIn("_cards", rows[0])
+            # With neither flag the Brain's own setting decides: nothing is sent.
+            self.bulk(str(Path(folder) / "q.txt"), set_dir=folder)
+            self.assertNotIn("cards", Handler.seen[-1][1])
+        for site in ("--prod", "--student"):
+            result = subprocess.run([sys.executable, str(ROOT / "rocky"), "ask", "hi", site, "--cards"],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("never takes it", result.stderr)
+
+    def test_the_reply_says_what_the_answer_cards_did(self):
+        def shown(metrics):
+            payload = {"answer": "Open 8-5.", "status": "answered", **metrics}
+            return subprocess.run([sys.executable, str(ROOT / "rocky-format.py")],
+                                  input=json.dumps(payload), capture_output=True, text=True,
+                                  timeout=30).stdout
+        self.assertNotIn("Answer card", shown({}))
+        self.assertNotIn("Answer card", shown({"metrics": {"decidedBy": "one_call"}}))
+        self.assertIn(
+            'Answer card: code answered from a card, with no AI call. Best card: '
+            '"Appeal a parking ticket", score 0.917, lead 0.208.',
+            shown({"metrics": {"answerCard": {"card": "c1", "score": 0.917, "lead": 0.208,
+                                              "said": True, "task": "Appeal a parking ticket"}}}))
+        self.assertIn(
+            "Answer card: not used (no one card clearly matches the question). "
+            "Best card: score 0.905, lead 0.0.",
+            shown({"metrics": {"answerCard": {"card": "c2", "score": 0.905, "lead": 0.0,
+                                              "said": False, "why": "not_clear"}}}))
+        self.assertIn("Answer card: not used (this release has no answer cards).",
+                      shown({"metrics": {"answerCard": {"said": False, "why": "no_cards"}}}))
+
 
 if __name__ == "__main__":
     unittest.main()
