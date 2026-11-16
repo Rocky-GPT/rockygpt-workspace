@@ -183,6 +183,21 @@ With the cards on, a plain how-to question that clearly matches one card is answ
 code with no AI call, and a line under the reply says so, or says why not. Like `--writer` it
 works with the dev UI and `--brain` only. Python 3 is required. `rocky-format.py` prints the response.
 
+`rocky-run-counts.py` reads a saved run (a `rocky bulk ... --brain PORT --out run.json` file, or a
+Repeat Test export from the dev UI) and prints counts from the answers' own traces. It asks
+nothing, so it is free, and it prints numbers and question ids only, never a question or an
+answer, so it is safe on the frozen blind set:
+
+```sh
+python3 rocky-run-counts.py run.json [--good good.json]
+```
+
+It says who wrote each answer (an answer card, other code, the two-stage page answer, the
+one-writer page answer, the tool loop), how often an answer card was said and why not, and what
+the three votes of the read and of each pick buy: how often one vote alone gives what the three
+decided, and whether three are steadier than one from try to try of the same question.
+`good.json` is `{question id: true or false}` for the graded first tries.
+
 Every request contains only `messages`: the ordered user and assistant messages
 for that conversation. There is no server conversation ID or hidden memory.
 Without `--history`, each CLI question is independent. With `--history`, the
