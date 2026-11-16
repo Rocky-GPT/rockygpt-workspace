@@ -180,7 +180,8 @@ the Brain's `BRAIN_LOOKUP_WRITER` and `BRAIN_PAGE_WRITER` say; it works with the
 `--cards` (ask or bulk) asks with the answer cards on, and `--no-cards` with them off, whatever
 the Brain's `BRAIN_CARD_ANSWERS` says; with neither, the Brain's setting decides, and it is off.
 With the cards on, a plain how-to question that clearly matches one card is answered from it by
-code with no AI call, and a line under the reply says so, or says why not. Like `--writer` it
+code (the AI only reads the message first, as it does for every message; it picks and writes
+nothing), and a line under the reply says so, or says why not. Like `--writer` it
 works with the dev UI and `--brain` only. Python 3 is required. `rocky-format.py` prints the response.
 
 `rocky-run-counts.py` reads a saved run (a `rocky bulk ... --brain PORT --out run.json` file, or a
