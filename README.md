@@ -165,7 +165,7 @@ the loader's internal `--snapshot` output; it contains credentials.
     ./rocky ask "..." --prod                    # ask the real website, like a student's browser
     ./rocky ask "..." --student                 # ask the laptop's student UI (localhost:3000)
     ./rocky bulk file <path> --prod             # a whole list against the real website
-    ./rocky ask "..." --writer template         # say the facts with the template (or: ai)
+    ./rocky ask "..." --writer template         # say the facts with the template (or: ai, sections)
     ./rocky ask "..." --cards                   # try the answer cards on this question
 
 Goes through `rockygpt-dev` at `http://localhost:3100` by default; set `ROCKY_DEV_UI`
@@ -173,8 +173,9 @@ to use another address. `--student` uses the laptop's student UI (`ROCKY_STUDENT
 default `http://localhost:3000`) and `--prod` the real website (`ROCKY_PROD_SITE`,
 default `https://rockygpt.danielrajakumar.com`), both through `/api/chat`, the same
 route a student's browser uses. A production question costs a fraction of a cent and
-counts toward the website's per-visitor rate limit. `--writer template|ai` (ask or
-bulk) picks which writer says the answer's facts, for lookups and page answers alike, whatever
+counts toward the website's per-visitor rate limit. `--writer template|ai|sections` (ask or
+bulk) picks which writer says the answer's facts, for lookups and page answers alike (`sections`,
+the one-call writer over whole plain sections, is for page answers only), whatever
 the Brain's `BRAIN_LOOKUP_WRITER` and `BRAIN_PAGE_WRITER` say; it works with the dev UI and
 `--brain`, and is refused with `--prod` and `--student`, since the student site never takes it.
 `--cards` (ask or bulk) asks with the answer cards on, and `--no-cards` with them off, whatever

@@ -15,8 +15,9 @@ shape the graders read:
       (a folder means its questions-frozen.json; a frozen file is checked against its .sha256)
   rocky bulk file questions.txt --brain 8013 --repeat 5 --out repeat.json
 
---writer template|ai picks which writer says the answer's facts for this run, whatever the Brain's
-settings are (a laptop Brain or the dev UI only; the student site never takes it).
+--writer template|ai|sections picks which writer says the answer's facts for this run, whatever the
+Brain's settings are (a laptop Brain or the dev UI only; the student site never takes it).
+"sections" is the one-call page writer over whole plain sections (Brain dev 2026-11-16).
 
 --cards asks with the answer cards on for this run, and --no-cards with them off, whatever the
 Brain's BRAIN_CARD_ANSWERS says (a laptop Brain or the dev UI only). A line under the reply says
@@ -224,7 +225,7 @@ def main():
     # No flag means the dev UI. It is filled in after parsing, not with set_defaults: argparse
     # would give the string "dev" to every --target option as its default and run it through
     # --brain's port check, so `rocky ask "q"` failed before asking anything.
-    where.add_argument("--writer", choices=["template", "ai"],
+    where.add_argument("--writer", choices=["template", "ai", "sections"],
                        help="which writer says the facts (laptop Brain or dev UI only)")
     where.add_argument("--cards", action=argparse.BooleanOptionalAction, default=None,
                        help="ask with the answer cards on, or off with --no-cards "
