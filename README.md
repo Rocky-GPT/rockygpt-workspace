@@ -169,11 +169,8 @@ to use another address. `--student` uses the laptop's student UI (`ROCKY_STUDENT
 default `http://localhost:3000`) and `--prod` the real website (`ROCKY_PROD_SITE`,
 default `https://rockygpt.danielrajakumar.com`), both through `/api/chat`, the same
 route a student's browser uses. A production question costs a fraction of a cent and
-counts toward the website's per-visitor rate limit. `--writer template|ai|sections` (ask or
-bulk) picks which writer says the answer's facts, for lookups and page answers alike (`sections`,
-the one-call writer over whole plain sections, is for page answers only), whatever
-the Brain's `BRAIN_LOOKUP_WRITER` and `BRAIN_PAGE_WRITER` say; it works with the dev UI and
-`--brain`, and is refused with `--prod` and `--student`, since the student site never takes it.
+counts toward the website's per-visitor rate limit. (`--writer` was removed with the Brain's
+audit item 13 on 2026-11-17: the Brain has one page writer and code writes lookups.)
 Python 3 is required. `rocky-format.py` prints the response.
 
 `rocky-run-counts.py` reads a saved run (a `rocky bulk ... --brain PORT --out run.json` file, or a
