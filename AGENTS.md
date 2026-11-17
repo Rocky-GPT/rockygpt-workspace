@@ -20,7 +20,7 @@ This root tooling repo coordinates 6 service repos:
 
 | Directory | Role | Stack | Branch | Check |
 | :--- | :--- | :--- | :--- | :--- |
-| **`rockygpt-brain`** | Answer engine, campus graph, budget ledger | Python 3.13, FastAPI, Postgres | `dev` | `.venv/bin/pytest` |
+| **`rockygpt-brain`** | Answer engine, campus graph, budget ledger | Python 3.13, FastAPI, LadybugDB graph file (Postgres only for the budget ledger) | `dev` | `.venv/bin/pytest` |
 | **`rockygpt-ui`** | Student-facing chat UI | Next.js, React, TypeScript | `dev` | `npm run lint` |
 | **`rockygpt-dev`** | Internal developer UI | Next.js, React, TypeScript | `dev` | `npm run lint` |
 | **`rockygpt-data`** | Campus data collection and publishing | Node.js, TypeScript, PostgreSQL | `dev` | `npm run build` |

@@ -74,13 +74,12 @@ class RockyTests(unittest.TestCase):
         try:
             env = os.environ | {"ROCKY_DEV_UI": f"http://127.0.0.1:{server.server_port}"}
             Handler.seen.clear()
-            for command in (["ask", "library hours?"], ["ask", "library hours?", "--writer", "ai"]):
-                result = subprocess.run([sys.executable, str(ROOT / "rocky"), *command],
-                                        env=env, capture_output=True, text=True, timeout=30)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("Open 8-5.", result.stdout)
-            self.assertEqual([path for path, _ in Handler.seen], ["/api/brain/chat", "/api/brain/chat"])
-            self.assertEqual(Handler.seen[1][1]["writer"], "ai")
+            result = subprocess.run([sys.executable, str(ROOT / "rocky"), "ask", "library hours?"],
+                                    env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Open 8-5.", result.stdout)
+            self.assertEqual([path for path, _ in Handler.seen], ["/api/brain/chat"])
+            self.assertNotIn("writer", Handler.seen[0][1])
         finally:
             server.shutdown()
 
@@ -144,18 +143,6 @@ class RockyTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / "rocky"), "ask", "hi", "--prod", "--student"],
                                 capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
-
-    def test_writer_is_sent_to_a_laptop_brain_and_refused_for_the_student_site(self):
-        with tempfile.TemporaryDirectory() as folder:
-            (Path(folder) / "q.txt").write_text("library hours?\n")
-            result, rows = self.bulk(str(Path(folder) / "q.txt"), "--writer", "ai", set_dir=folder)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(Handler.seen[-1][1]["writer"], "ai")
-            self.assertNotIn("_writer", rows[0])
-        result = subprocess.run([sys.executable, str(ROOT / "rocky"), "ask", "hi", "--prod", "--writer", "ai"],
-                                capture_output=True, text=True, timeout=30)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("never takes it", result.stderr)
 
 
 if __name__ == "__main__":
