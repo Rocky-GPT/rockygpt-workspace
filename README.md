@@ -10,9 +10,9 @@ terminal.
 ## The stack
 
 ```
-Student UI :3000 ──→ Brain :8000 ──→ Neon
-Dev UI     :3100 ──→ Brain :8000 ──→ Neon
-Data                 ingestion only ──→ Neon
+Student UI :3000 ──→ Brain :8000 ──→ graph file (R2 brain-graph/), ledger in Neon
+Dev UI     :3100 ──→ Brain :8000 ──→ graph file (R2 brain-graph/), ledger in Neon
+Data       nightly collection ──→ Neon ──→ graph build ──→ R2 brain-graph/
 ```
 
 Two front-end products over one backend. `rockygpt-ui` is only what a student
@@ -44,9 +44,9 @@ only the assigned values into the variable names its service expects.
 
 | Stored variable | Consumers / service variable |
 | --- | --- |
-| `LOCAL_DATABASE_URL` | Local Brain → `DATABASE_URL` |
+| `LOCAL_DATABASE_URL` | Local data commands → `DATABASE_URL` (the Brain no longer reads it) |
 | `LOCAL_LEDGER_DATABASE_URL` | Local Brain → `BRAIN_LEDGER_DATABASE_URL` |
-| `PRODUCTION_DATABASE_URL` | Data and production Brain → `DATABASE_URL` |
+| `PRODUCTION_DATABASE_URL` | Data → `DATABASE_URL` |
 | `PRODUCTION_LEDGER_DATABASE_URL` | Production Brain → `BRAIN_LEDGER_DATABASE_URL` |
 | `PRODUCTION_SERVICE_TOKEN` | Production Brain, student UI, production-connected dev UI → `SERVICE_TOKEN` |
 | `BRAIN_OPENAI_API_KEY` | Local and production Brain |
@@ -135,7 +135,9 @@ saved chats; use plain `start` while editing UI code, since a build does not rel
 `rockygpt-brain/.env.local`, or its 1Password sources when that file is absent; both web clients are pointed at the
 local Brain automatically. The local Brain is bound to loopback and does not
 use a staging token.
-The Brain uses its own `DATABASE_URL`. Its validated variables are passed through
+The Brain serves campus facts only from the graph file (`BRAIN_GRAPH_ONLY_DIR`); since
+2026-11-17 (audit item 13) it has no campus-database serving path and does not read
+`DATABASE_URL`. It uses Neon only for its budget ledger (`BRAIN_LEDGER_DATABASE_URL`). Its validated variables are passed through
 an in-memory pipe and inherited by reload workers, so workers do not compete to
 read the 1Password mount. Both `start` and `restart` reject incomplete or
 production Brain settings before stopping the current services.
@@ -167,11 +169,8 @@ to use another address. `--student` uses the laptop's student UI (`ROCKY_STUDENT
 default `http://localhost:3000`) and `--prod` the real website (`ROCKY_PROD_SITE`,
 default `https://rockygpt.danielrajakumar.com`), both through `/api/chat`, the same
 route a student's browser uses. A production question costs a fraction of a cent and
-counts toward the website's per-visitor rate limit. `--writer template|ai|sections` (ask or
-bulk) picks which writer says the answer's facts, for lookups and page answers alike (`sections`,
-the one-call writer over whole plain sections, is for page answers only), whatever
-the Brain's `BRAIN_LOOKUP_WRITER` and `BRAIN_PAGE_WRITER` say; it works with the dev UI and
-`--brain`, and is refused with `--prod` and `--student`, since the student site never takes it.
+counts toward the website's per-visitor rate limit. (`--writer` was removed with the Brain's
+audit item 13 on 2026-11-17: the Brain has one page writer and code writes lookups.)
 Python 3 is required. `rocky-format.py` prints the response.
 
 `rocky-run-counts.py` reads a saved run (a `rocky bulk ... --brain PORT --out run.json` file, or a
