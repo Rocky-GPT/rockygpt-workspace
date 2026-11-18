@@ -162,7 +162,6 @@ the loader's internal `--snapshot` output; it contains credentials.
     ./rocky ask "..." --prod                    # ask the real website, like a student's browser
     ./rocky ask "..." --student                 # ask the laptop's student UI (localhost:3000)
     ./rocky bulk file <path> --prod             # a whole list against the real website
-    ./rocky ask "..." --writer template         # say the facts with the template (or: ai, sections)
 
 Goes through `rockygpt-dev` at `http://localhost:3100` by default; set `ROCKY_DEV_UI`
 to use another address. `--student` uses the laptop's student UI (`ROCKY_STUDENT_UI`,
